@@ -119,15 +119,17 @@ int dcf_block_ready(const dcf_t *d)
 void dcf_block(dcf_t *d)
 {
     static float sc[DCF_SPS];
+    static float y2[2 * DCF_SPS];                   /* yr twice: no modulo in the inner loops */
     float med, sg; int m, k, best;
     /* second mark (running) */
     if (d->nsec > 0 && d->amp > 0)
         for (k = 0; k < DCF_SPS; k++) d->yr[k] = DCF_KEEP * d->yr[k] + d->yf[k] / (d->nsec * d->amp);
+    memcpy(y2, d->yr, sizeof d->yr); memcpy(y2 + DCF_SPS, d->yr, sizeof d->yr);
     /* coarse (every 4th offset, 2 ms), then all offsets within +-2 ms of the best:
      * ~1.1 M multiply-adds instead of 4 M, keeps the 10-min evaluation to a few ms */
     for (m = 0; m < DCF_SPS; m += 4) {
-        float s = 0;
-        for (k = 0; k < DCF_SPS; k++) s += d->yr[(m + k) % DCF_SPS] * T[k];
+        const float *y = y2 + m; float s = 0;
+        for (k = 0; k < DCF_SPS; k++) s += y[k] * T[k];
         sc[m / 4] = s;
     }
     best = 0;
@@ -136,16 +138,16 @@ void dcf_block(dcf_t *d)
     {
         int c = best * 4, bb = c; float bs = sc[best];
         for (m = c - 4; m <= c + 4; m++) {
-            int mm = (m + DCF_SPS) % DCF_SPS; float s = 0;
+            int mm = (m + DCF_SPS) % DCF_SPS; float s = 0; const float *y = y2 + mm;
             if (m == c) continue;
-            for (k = 0; k < DCF_SPS; k++) s += d->yr[(mm + k) % DCF_SPS] * T[k];
+            for (k = 0; k < DCF_SPS; k++) s += y[k] * T[k];
             if (s > bs) { bs = s; bb = mm; }
         }
         sc[best] = bs; best = bb;
     }
     {
-        float s = 0;
-        for (k = 0; k < DCF_SPS; k++) s += d->yr[(best + k) % DCF_SPS] * T[k];
+        float s = 0; const float *y = y2 + best;
+        for (k = 0; k < DCF_SPS; k++) s += y[k] * T[k];
         d->mark_sigma = (s - med) / sg;
     }
     if (d->mark_sigma > 6) {

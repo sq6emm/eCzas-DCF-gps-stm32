@@ -44,11 +44,11 @@
 #define DECIM        100                  /* 1 Msps -> 10 kHz */
 #define F_CARRIER    225000.0
 
-#define RING_BLK 8                          /* DMA ring: 40 ms of slack for slow frame decodes */
+#define RING_BLK 12                         /* DMA ring: 60 ms of slack (frame decodes, the 10-min DCF77 evaluation) */
 static uint16_t adc_buf[RING_BLK * BLOCK] __attribute__((aligned(32)));
 static volatile uint32_t dma_wraps;
 static volatile uint32_t overruns, dma_halves;
-static uint32_t max_lag, pl_bad; static uint64_t busy_cyc;
+static uint32_t max_lag, pl_bad, max_blk_cyc; static uint64_t busy_cyc;
 
 ADC_HandleTypeDef hadc1;
 DMA_HandleTypeDef hdma_adc1;
@@ -100,7 +100,7 @@ static const char *f3(char *b, double v)     /* 3 decimals (the printf here has 
 static uint64_t n2k;                      /* 2 kHz samples since start: the common time base */
 static void put_line(const char *tag, const char *msg)
 {
-    char b[260];
+    char b[480];
     unsigned long s10 = (unsigned long)(n2k / 200);
     snprintf(b, sizeof b, "[%7lu.%lu] %-7s %s\r\n", s10 / 10, s10 % 10, tag, msg);
     uart_puts(b);
@@ -506,7 +506,7 @@ static void handle_candidate(void)
    fed back - where its second starts relative to the e-CzasPL second */
 static void dcf_report(void)
 {
-    char m[260], b1[16], b2[16], b3[16], b4[16], b5[16], b6[16], cmp[48] = "";
+    char m[420], b1[16], b2[16], b3[16], b4[16], b5[16], b6[16], cmp[48] = "";
     if (dcf.have_mark && tk.synced) {
         double start = (double)((n2k - dcf.mark) / 2000 * 2000 + dcf.mark) + (dcf.pm_sigma > 5 ? dcf.pm_lag_ms * 2.0 : 0);
         uint32_t sec, us;
@@ -526,7 +526,7 @@ static void dcf_report(void)
 /* ---------------------------------------------------------------- main */
 int main(void)
 {
-    char m[260], b1[16], b2[16], b3[16];
+    char m[420], b1[16], b2[16], b3[16];
     SCB_EnableICache();
     SCB_EnableDCache();
     HAL_Init();
@@ -606,7 +606,7 @@ int main(void)
         }
         process_block(b, mean);
         if (ez.cand_ready) handle_candidate();
-        busy_cyc += DWT->CYCCNT - c0;
+        { uint32_t dc = DWT->CYCCNT - c0; busy_cyc += dc; if (dc > max_blk_cyc) max_blk_cyc = dc; }
 
         if (n2k >= next_s) {              /* once a second */
             next_s += 2000;
@@ -658,15 +658,16 @@ int main(void)
             uint32_t sec;
             char d1[40] = "no time yet", b4[16];
             if (tk_time(&tk, now_tick(), &sec, 0)) date_str(d1, sec, 0);
-            snprintf(m, sizeof m, "%s | eCzas carrier %s %s Hz noise %s deg lvl0 %s | heard %lu, decoded %lu, confirmed %lu, rejected %lu | DCF77 carrier %s %s mHz | clock %+ld ppm (LSE) | cpu %lu%%, max lag %lu ms%s",
+            snprintf(m, sizeof m, "%s | eCzas carrier %s %s Hz noise %s deg lvl0 %s | heard %lu, decoded %lu, confirmed %lu, rejected %lu | DCF77 carrier %s %s mHz | clock %+ld ppm (LSE) | cpu %lu%%, longest block %lu ms, max lag %lu ms%s",
                      d1, PS[trk_e.state], f1(b1, trk_e.hz, 1), f1(b2, trk_e.err_avg * 360, 0), f1(b3, trk_e.lvl0 * 360, 0),
                      (unsigned long)n_heard, (unsigned long)n_decoded, (unsigned long)n_conf, (unsigned long)n_rej,
                      dcf_state_txt(), f1(b4, trk_d.hz * 1000, 1), (long)lround((cur_tps_ratio - 1) * 1e6),
-                     (unsigned long)(busy_cyc / (SystemCoreClock / 10)), (unsigned long)(max_lag / 1000),
+                     (unsigned long)(busy_cyc / (SystemCoreClock / 10)), (unsigned long)(max_blk_cyc / (SystemCoreClock / 1000)),
+                     (unsigned long)(max_lag / 1000),
                      overruns ? " OVERRUN" : "");
             if (pl_bad) { strcat(m, " PLBAD"); pl_bad = 0; }
             put_line("STATUS", m);
-            overruns = 0; busy_cyc = 0; max_lag = 0;
+            overruns = 0; busy_cyc = 0; max_lag = 0; max_blk_cyc = 0;
         }
     }
 }
