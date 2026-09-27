@@ -108,3 +108,10 @@ transmitter offset); a GPS PPS will separate the two.
 
 All of this comes through a ferrite rod tuned to 217 kHz, i.e. DCF77 is 20–30 dB below
 what a tuned antenna would give.
+
+### Tracking per 10 minutes (from 27 Sep 2026 evening)
+
+`tools/dcf_track.py` runs continuously. First 2.5 h (17:40–20:10 UTC): phase code 5–8σ per
+10-min block, lag −8.19 … −8.89 ms; over 30 min 9–13σ, lag **−8.42 … −8.65 ms**. One block
+(19:40) was too weak (2.5σ). The amplitude pattern is only 1–2σ per block; over 10 minutes
+the phase code is the useful measure. The overnight run (sky wave on both paths) follows.

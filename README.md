@@ -41,6 +41,7 @@ git clone --recurse-submodules git@github.com:sq6emm/eCzas-DCF-gps-stm32.git
 | `tools/nucleo_logger.py` | serial logger: text lines with host UTC time to `rx.log`; for `AUDIO_DUMP` builds, 10-min 10 kHz WAVs plus an index (sample number ↔ host time) |
 | `tools/prof.py` | carrier spectrum profile (dBc/Hz at 0.5–600 Hz offset); shows clock phase noise |
 | `tools/nucleo_ana.py` | phase of the known preamble bits in slots where the IC-705 saw a time frame: true bit separation and noise |
+| `tools/dcf_track.py` | per 10-min UTC block: exact phase-code lag and σ (also over 30 min), amplitude-pattern lag, DCF77 carrier, LSE ppm, e-CzasPL frames/noise (runs as container `nucleo-dcf-track`) |
 | `tools/dcf_pm.py` | DCF77 phase-code search on per-second rows saved by `dcf_assist.py` (`DCF_SAVE=file.npz`) |
 | `tools/dcf_assist.py` | DCF77 from the 77.5 kHz channel, assisted by eCzas time: carrier, amplitude-pattern correlation, bit check, phase-code search |
 | `tools/compare3.py` | slot-by-slot comparison of the Nucleo, the Legnica eCzas board and the IC-705 reference |
