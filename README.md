@@ -13,8 +13,8 @@ included as the `eczas` submodule.
 - **e-CzasPL:** works. With a ferrite rod on the ADC, the Nucleo decodes **~93 %** of
   time frames next to an IC-705 reference, against ~17 % for the eCzas board at the
   noisy Legnica site. No wrong times.
-- **DCF77:** found through the same (225 kHz-tuned) antenna by correlating the amplitude
-  pattern predicted from eCzas time; the phase code is still being integrated.
+- **DCF77:** found through the same (225 kHz-tuned) antenna, assisted by eCzas time:
+  amplitude pattern 53× and the 512-chip phase code at 15σ in 2.5 h.
 - **GPS, OCXO:** planned, see [PLAN.md](PLAN.md).
 
 Details: [doc/RESULTS.md](doc/RESULTS.md).
@@ -40,6 +40,7 @@ git clone --recurse-submodules git@github.com:sq6emm/eCzas-DCF-gps-stm32.git
 | `tools/nucleo_logger.py` | serial logger: text lines with host UTC time to `rx.log`; for `AUDIO_DUMP` builds, 10-min 10 kHz WAVs plus an index (sample number ↔ host time) |
 | `tools/prof.py` | carrier spectrum profile (dBc/Hz at 0.5–600 Hz offset); shows clock phase noise |
 | `tools/nucleo_ana.py` | phase of the known preamble bits in slots where the IC-705 saw a time frame: true bit separation and noise |
+| `tools/dcf_pm.py` | DCF77 phase-code search on per-second rows saved by `dcf_assist.py` (`DCF_SAVE=file.npz`) |
 | `tools/dcf_assist.py` | DCF77 from the 77.5 kHz channel, assisted by eCzas time: carrier, amplitude-pattern correlation, bit check, phase-code search |
 | `tools/compare3.py` | slot-by-slot comparison of the Nucleo, the Legnica eCzas board and the IC-705 reference |
 

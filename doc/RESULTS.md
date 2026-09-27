@@ -54,5 +54,30 @@ time code, parity). Correlating coherently over many seconds gives
   delay is not calibrated);
 - the predicted bits confirmed by the dip lengths.
 
-The 512-chip phase code (±15.6°) should correlate at only ~3.6σ with 23 min, so it
-needs about 2 h of data.
+### 2.5 hours (17:38–20:07 UTC, 8944 s)
+
+| check | result |
+|---|---|
+| carrier | line 27 dB above the 1–20 Hz median, 0.005 Hz from the LSE-based prediction (+0.81 ppm) |
+| amplitude pattern | **53.3×** the rms beyond ±250 ms, best lag **−11 ms**; triangle from about −175 to +150 ms |
+| data bits | seconds predicted '0' vs '1' clearly separated in the 110–190 ms window |
+| **phase code** | **15.4σ** (`tools/dcf_pm.py`); for 246 k noise-only values the largest is expected at 4.5–5σ |
+
+Phase code details:
+
+- Method: D = mean(quadrature | bit 0) − mean(quadrature | bit 1) over all seconds with
+  a known bit. The code flips with the bit and doubles; anything locked to the second
+  but independent of the bit (mains, AM leakage) cancels. Without this step, structured
+  interference made all candidates score alike.
+- Only the x⁹+x⁵+1 sequence matches, not its reverse. The best candidates lie on one
+  line, lag ≈ (shift − 145) × 1.548 ms: shifting the m-sequence by one chip is the same
+  as delaying by one chip. Without PTB's exact register start state the whole-chip
+  offset stays open. The fine timing is sharp: −6.0 / −11.5 / **−15.4** / −12.2 / −6.2σ
+  in 0.5 ms steps, i.e. −6.98 ms modulo 1.548 ms.
+- The amplitude marks put the DCF77 second about 11 ms *before* the Nucleo's eCzas
+  second. Propagation (DCF77 ~1.9 ms, e-CzasPL ~0.8 ms) cannot explain it; it is the
+  uncalibrated receive delay of the Nucleo's e-CzasPL timescale (or of the DCF77 path).
+  To be calibrated against GPS PPS (see PLAN.md).
+
+All of this comes through a ferrite rod tuned to 217 kHz, i.e. DCF77 is 20–30 dB below
+what a tuned antenna would give.

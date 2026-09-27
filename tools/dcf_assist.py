@@ -141,6 +141,16 @@ for i in range(sec0, sec1):
     fold += (1 - 2 * bit) * q[j:j + int(FS)]; nf += 1
 fold /= max(nf, 1)
 print(f"phase code: {nf} seconds folded")
+if os.environ.get("DCF_SAVE"):                             # per-second quadrature rows, for offline PRN work
+    rows, sg, ss_ = [], [], []
+    for i in range(sec0, sec1):
+        s_ = i % 60
+        j = np.searchsorted(t_utc, i)
+        if j + int(FS) > len(q) or not good[j:j + int(FS)].all(): continue
+        bit = cache.get(i - s_ + 60, cest_bits(i - s_ + 60))[s_] if s_ != 59 else None
+        rows.append(q[j:j + int(FS)].astype(np.float32)); sg.append(-9 if bit is None else bit); ss_.append(s_)
+    np.savez(os.environ["DCF_SAVE"], q=np.array(rows), bit=np.array(sg), sec=np.array(ss_))
+    print("saved", len(rows), "seconds to", os.environ["DCF_SAVE"])
 
 def mseq(taps):
     st = [1] * 9; out = []
