@@ -1,0 +1,3 @@
+[submodule "eczas"]
+	path = eczas
+	url = https://github.com/sq6emm/eCzasPL-TimeReceiver225kHz.git

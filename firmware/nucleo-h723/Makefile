@@ -1,9 +1,9 @@
-# NUCLEO-H723ZG e-CzasPL receiver (direct sampling + the unchanged eCzas core from ../src/core)
+# NUCLEO-H723ZG e-CzasPL receiver (direct sampling + the unchanged eCzas core from the eczas submodule)
 #   make                        normal build, 115200 baud text output
 #   make CFLAGS_EXTRA=-DAUDIO_DUMP   also streams the core's 10 kHz input (921600 baud, tools/nucleo_logger.py)
 # LIB must hold CMSIS_5, cmsis_device_h7 and stm32h7xx_hal_driver (see README.md).
 LIB  ?= lib
-ECZAS = ../src/core
+ECZAS = ../../eczas/Firmware/src/core
 HAL   = $(LIB)/stm32h7xx_hal_driver
 DEV   = $(LIB)/cmsis_device_h7
 CORE  = $(LIB)/CMSIS_5/CMSIS/Core/Include
