@@ -21,7 +21,8 @@ timekeeper.c). No radio chip, only an antenna tuned to ~225 kHz.
 A0 -> ADC1 16 bit, 1 Msps (TIM6) -> DMA ring (8 x 5 ms)
    -> mixer at 225 kHz (phase-locked to the LSE crystal, see below)
    -> sum over exactly 100 us of true time -> 10 kHz complex
-   -> shift to +1 kHz, real part, AGC -> eCzas core (PLL, frame decoder, timekeeper)
+   -> complex low-pass +-400 Hz (no image noise) -> shift to +1 kHz, real part, AGC
+   -> eCzas core (PLL, frame decoder, timekeeper)
 ```
 
 An FFT search (8192 points at 1 kHz, ±450 Hz) finds the carrier at start and after
@@ -103,3 +104,23 @@ room as the reference. The Legnica eCzas board (site with strong local noise sin
 
 One miscorrected frame (year 2066) was rejected by the timekeeper. The frames that
 were accepted agree with the Nucleo's clock to within ±0.7 ms.
+
+Full hour 15:10–16:10 UTC (301 time frames): IC-705 99.7 %, Nucleo 84.7 %
+(137 decoded + 118 confirmed), Legnica 16.6 %. No wrong times; 8 miscorrected
+low-SNR frames (nonsense years) and one early frame were rejected by the timekeeper.
+The early frame was the 16:19:15 frame sent in slot 16:19:12 (−2479 ms). The IC-705
+saw it independently (−2472 ms).
+
+### Image filter (A/B test, same day)
+
+Taking the real part of the 1 kHz-shifted complex stream folds the noise of the image
+side onto the signal. A ±400 Hz complex low-pass before that step (4th-order
+Butterworth, 1.03 ms flat delay, subtracted from the frame timing) gave:
+
+| | IC-705 time frames | Nucleo got | decoded / confirmed |
+|---|---|---|---|
+| without, 16:10–16:42 | 155 | 84.5 % | 83 / 48 |
+| with, 16:45–17:27 | 110 | **92.7 %** | 89 / 13 |
+
+The filter also lowered carrier noise from 9–13° to 7–8°. Build with
+`-DNO_IMAGE_FILTER` to leave it out.

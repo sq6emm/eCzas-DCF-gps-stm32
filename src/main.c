@@ -404,6 +404,21 @@ static void emit_sample(float zr, float zi)
             if (++aq_n == AQ_LEN) acquisition_done();
         }
     }
+#ifndef NO_IMAGE_FILTER
+    {   /* complex low-pass +-400 Hz around the carrier (4th-order Butterworth,
+           1.03 ms flat delay): without it, taking the real part below folds the
+           noise of the image side (-1 kHz) onto the signal, +3 dB noise */
+        static const float B[2][3] = { { 1.83216023e-04f, 3.66432047e-04f, 1.83216023e-04f }, { 1, 2, 1 } };
+        static const float A[2][2] = { { -1.57523998f, 0.626334259f }, { -1.76882786f, 0.826201333f } };
+        static float sr[2][2], si[2][2];
+        for (int k = 0; k < 2; k++) {
+            float yr = B[k][0] * zr + sr[k][0], yi = B[k][0] * zi + si[k][0];
+            sr[k][0] = B[k][1] * zr - A[k][0] * yr + sr[k][1]; si[k][0] = B[k][1] * zi - A[k][0] * yi + si[k][1];
+            sr[k][1] = B[k][2] * zr - A[k][1] * yr;            si[k][1] = B[k][2] * zi - A[k][1] * yi;
+            zr = yr; zi = yi;
+        }
+    }
+#endif
     float y = zr * sh_c[sh_i] - zi * sh_s[sh_i];     /* carrier to +1 kHz, real part */
     if (++sh_i == 10) sh_i = 0;
     float a = fabsf(y) * agc;
@@ -460,6 +475,9 @@ static void handle_candidate(void)
     frame_info_t fi;
     char m[240], d1[40], b1[16];
     int64_t tick = sample_tick(dsp_base_n + (uint64_t)(c->start_block - 1) * DSP_BLOCK);
+#ifndef NO_IMAGE_FILTER
+    tick -= FCY_HZ / 1000000 * 1034;     /* the image filter's delay */
+#endif
     memset(&fi, 0, sizeof fi);
     frame_status_t st = frame_decode(c->ph + CAND_PRE, &fi);
     if (st == FR_NOT_TIME) { g_dsp.cand_ready = 0; return; }
