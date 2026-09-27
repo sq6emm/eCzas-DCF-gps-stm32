@@ -201,6 +201,10 @@ def main():
                         if r:
                             cdb, D, rows, y, nsec = r
                             hist[u] = D * nsec
+                            np.save(os.path.join(os.path.dirname(OUT), f"D_{u}.npy"), hist[u])
+                            for v in (u - 2 * BLK, u - BLK):          # survive restarts
+                                fn = os.path.join(os.path.dirname(OUT), f"D_{v}.npy")
+                                if v not in hist and os.path.exists(fn): hist[v] = np.load(fn)
                             ps, pl = pm_peak(D)
                             prev = [hist[v] for v in (u - 2 * BLK, u - BLK, u) if v in hist]
                             p3s, p3l = pm_peak(sum(prev) / sum(1 for _ in prev) / nsec) if len(prev) == 3 else (float("nan"), float("nan"))
