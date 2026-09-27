@@ -354,6 +354,17 @@ static coh_trk_t trk_e, trk_d;
 static ecz_t ez;
 static dcf_t dcf;
 static int dcf_blocks_locked; static float dcf_line_hz = 1e9f;
+/* DCF77 counts as locked only when the tracked line also carries confirmed second marks
+   (a local spur can be tracked, but it has no 1-s amplitude pattern) */
+static int dcf_verified(void)
+{
+    return trk_d.state == COH_TRACK && dcf.have_mark && dcf.mark_sigma >= 6 && fabsf((float)trk_d.hz - dcf_line_hz) < 0.05f;
+}
+static const char *dcf_state_txt(void)
+{
+    return trk_d.state == COH_SEARCH ? "searching" : trk_d.state == COH_PULL ? "pulling in" :
+           dcf_verified() ? "locked (second marks)" : "tracking, not verified";
+}
 static void dcf_report(void);
 #ifdef AUDIO_DUMP
 static void dump(uint8_t type, float zr, float zi)
@@ -392,6 +403,7 @@ static void station_samples(float er, float ei, float dr, float di)
             snprintf(m, sizeof m, "carrier at %s Hz has no second marks - rejected, searching", f1(b1, trk_d.hz, 1));
             put_line("DCF77", m);
             coh_reject(&trk_d, 0.05f); dcf_blocks_locked = 0; memset(dcf.yr, 0, sizeof dcf.yr);
+            dcf.have_mark = 0; dcf.mark_sigma = 0;           /* the new line must prove itself */
         }
         dcf_report();
     }
@@ -504,7 +516,7 @@ static void dcf_report(void)
         }
     }
     snprintf(m, sizeof m, "carrier %s, second mark %s ms of the LSE second (%s sigma), minute %s (%s sigma), phase code %s ms (%s sigma)%s",
-             trk_d.state == COH_TRACK ? "locked" : trk_d.state == COH_PULL ? "pulling in" : "searching",
+             dcf_state_txt(),
              dcf.have_mark ? f1(b1, dcf.mark / 2.0, 0) : "-", f1(b2, dcf.mark_sigma, 0),
              dcf.have_minute ? "found" : "not yet", f1(b3, dcf.minute_sigma, 0),
              dcf.pm_sigma > 0 ? f1(b4, dcf.pm_lag_ms, 1) : "-", f1(b6, dcf.pm_sigma, 0), cmp);
@@ -601,7 +613,7 @@ int main(void)
             blk_ratio_sum = 0; blk_ratio_n = 0;
             tk_maintain(&tk, now_tick());
             HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, trk_e.state == COH_TRACK && trk_e.err_avg * 360 < 25 ? GPIO_PIN_SET : GPIO_PIN_RESET);
-            HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1, trk_d.state == COH_TRACK && trk_d.err_avg * 360 < 40 ? GPIO_PIN_SET : GPIO_PIN_RESET);
+            HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1, dcf_verified() ? GPIO_PIN_SET : GPIO_PIN_RESET);
         }
         if (n2k >= next_carrier) {        /* every 60 s: both carriers against the LSE crystal */
             next_carrier += 120000;
@@ -614,8 +626,8 @@ int main(void)
                      f1(b1, re.freq_hz * 1000, 1), f1(b2, re.cn0_dbhz, 0), f1(b3, re.err_deg, 0), f3(b7, re.phase_cyc),
                      re.state == COH_TRACK ? "locked" : re.state == COH_PULL ? "pulling in" : "searching",
                      f1(b4, rd2.freq_hz * 1000, 1), f1(b5, rd2.cn0_dbhz, 0), f3(b8, rd2.phase_cyc),
-                     rd2.state == COH_TRACK ? "locked" : rd2.state == COH_PULL ? "pulling in" : "searching",
-                     (re.state == COH_TRACK && rd2.state == COH_TRACK) ? f1(b6, ppb, 1) : "-");
+                     dcf_state_txt(),
+                     (re.state == COH_TRACK && dcf_verified()) ? f1(b6, ppb, 1) : "-");
             put_line("CARRIER", m);
         }
 #ifdef CLOCK_TEST
@@ -649,7 +661,7 @@ int main(void)
             snprintf(m, sizeof m, "%s | eCzas carrier %s %s Hz noise %s deg lvl0 %s | heard %lu, decoded %lu, confirmed %lu, rejected %lu | DCF77 carrier %s %s mHz | clock %+ld ppm (LSE) | cpu %lu%%, max lag %lu ms%s",
                      d1, PS[trk_e.state], f1(b1, trk_e.hz, 1), f1(b2, trk_e.err_avg * 360, 0), f1(b3, trk_e.lvl0 * 360, 0),
                      (unsigned long)n_heard, (unsigned long)n_decoded, (unsigned long)n_conf, (unsigned long)n_rej,
-                     PS[trk_d.state], f1(b4, trk_d.hz * 1000, 1), (long)lround((cur_tps_ratio - 1) * 1e6),
+                     dcf_state_txt(), f1(b4, trk_d.hz * 1000, 1), (long)lround((cur_tps_ratio - 1) * 1e6),
                      (unsigned long)(busy_cyc / (SystemCoreClock / 10)), (unsigned long)(max_lag / 1000),
                      overruns ? " OVERRUN" : "");
             if (pl_bad) { strcat(m, " PLBAD"); pl_bad = 0; }
