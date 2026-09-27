@@ -295,6 +295,30 @@ static double blk_ratio_sum; static int blk_ratio_n;   /* averages for the per-s
    the probe's nominal 1 MHz scale, i.e. where the carrier appears */
 static double f_mix;
 static float mix_c = 1, mix_s = 0, rot_c, rot_s;
+/* second channel: DCF77 at 77.5 kHz, same phase-locked true time, streamed as
+   2 kHz complex baseband (AUDIO_DUMP builds) for analysis on the host */
+#define F_DCF 77500.0
+static float mx2_c = 1, mx2_s = 0, rt2_c = 1, rt2_s = 0, acc2_r, acc2_i;
+static double pl_cyc2;
+static uint64_t dcf_n;                     /* 2 kHz samples produced */
+static void dcf_emit(float zr, float zi)
+{
+    static float sr, si; static int k;
+    sr += zr; si += zi;
+    if (++k < 5) return;
+    k = 0;
+#ifdef AUDIO_DUMP
+    {   /* packet: A5 5B, u32 index of the first 2 kHz sample, 200 x (float re, float im) */
+        static struct __attribute__((packed)) { uint8_t m0, m1; uint32_t n0; float x[400]; } pk = { 0xA5, 0x5B, 0, {0} };
+        static int pn;
+        if (pn == 0) pk.n0 = (uint32_t)dcf_n;
+        pk.x[2 * pn] = sr; pk.x[2 * pn + 1] = si;
+        if (++pn == 200) { uart_write(&pk, sizeof pk); pn = 0; }
+    }
+#endif
+    dcf_n++;
+    sr = si = 0;
+}
 static void set_mix(double f)
 {
     f_mix = f;
@@ -447,14 +471,19 @@ static void process_block(const uint16_t *b, float mean)
     for (int n = 0; n < BLOCK; n++) {
         float x = (float)b[n] - mean;
         float xr = x * mix_c, xi = x * mix_s;
+        float x2r = x * mx2_c, x2i = x * mx2_s;
+        float t2 = mx2_c * rt2_c - mx2_s * rt2_s;
+        mx2_s = mx2_c * rt2_s + mx2_s * rt2_c; mx2_c = t2;
         float t = mix_c * rot_c - mix_s * rot_s;
         mix_s = mix_c * rot_s + mix_s * rot_c; mix_c = t;
         if (dec_pos + 1.0 <= step) {       /* whole sample belongs to this output */
-            acc_r += xr; acc_i += xi; dec_pos += 1.0;
+            acc_r += xr; acc_i += xi; acc2_r += x2r; acc2_i += x2i; dec_pos += 1.0;
         } else {                           /* split it between this output and the next */
             float f = (float)(step - dec_pos);
             emit_sample(acc_r + f * xr, acc_i + f * xi);
+            dcf_emit(acc2_r + f * x2r, acc2_i + f * x2i);
             acc_r = (1 - f) * xr; acc_i = (1 - f) * xi;
+            acc2_r = (1 - f) * x2r; acc2_i = (1 - f) * x2i;
             dec_pos = 1.0 - f;
         }
     }
@@ -591,8 +620,14 @@ int main(void)
                 f_mix = dcyc * (FS_NOM_HZ / BLOCK);
                 cur_tps_ratio = BLOCK / (dt * FS_NOM_HZ);
                 pl_cyc = fmod(pl_cyc + dcyc, 1.0);
+                {
+                    double d2 = F_DCF * dt, p2 = -2 * M_PI * pl_cyc2, w2 = -2 * M_PI * d2 / BLOCK;
+                    mx2_c = (float)cos(p2); mx2_s = (float)sin(p2);
+                    rt2_c = (float)cos(w2); rt2_s = (float)sin(w2);
+                    pl_cyc2 = fmod(pl_cyc2 + d2, 1.0);
+                }
                 blk_ratio_sum += cur_tps_ratio; blk_ratio_n++;
-            } else pl_cyc = fmod(pl_cyc + F_true * dt, 1.0), pl_bad++;
+            } else pl_cyc = fmod(pl_cyc + F_true * dt, 1.0), pl_cyc2 = fmod(pl_cyc2 + F_DCF * dt, 1.0), pl_bad++;
             pl_t = t1;
         } else if (lse_ok && lse_seq >= 2) {
             pl_calibrate(wr);
@@ -643,6 +678,16 @@ int main(void)
 #endif
         if (audio_n >= next_status) {     /* every 10 s */
             next_status += 100000;
+            {   /* map the sample count to eCzas time, for comparing other signals offline */
+                uint32_t sec, us;
+                if (tk_time(&tk, now_tick(), &sec, &us)) {
+                    char t[120];
+                    snprintf(t, sizeof t, "audio sample %lu%09lu = eCzas %lu.%06lu (unix), dcf sample %lu",
+                             (unsigned long)(audio_n / 1000000000ULL), (unsigned long)(audio_n % 1000000000ULL),
+                             (unsigned long)(sec + 946684800UL), (unsigned long)us, (unsigned long)dcf_n);
+                    put_line("TIMEMAP", t);
+                }
+            }
             static const char *PS[] = { "searching", "locking (fast)", "locking", "locked" };
             uint32_t sec;
             char d1[40] = "no time yet";

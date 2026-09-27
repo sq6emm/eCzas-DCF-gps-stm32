@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """Log the NUCLEO receiver's serial port: text lines with host UTC time, and
 (AUDIO_DUMP builds) the core's 10 kHz input as 10-minute WAV files plus an index
-of (first sample number, host time) per packet for alignment with other receivers."""
+of (first sample number, host time) per packet for alignment with other receivers,
+and the DCF77 channel (2 kHz complex float32) as 10-minute .c64 files + index."""
 import datetime, os, serial, struct, sys, time, wave
 
 DEV, BAUD, OUT = sys.argv[1], int(sys.argv[2]), sys.argv[3]
 PK = 2 + 4 + 400
+PK2 = 2 + 4 + 1600
+dcf = dcf_idx = None
+dcf_t0 = 0
 os.makedirs(OUT, exist_ok=True)
 s = serial.Serial(DEV, BAUD, timeout=0.2)
 log = open(os.path.join(OUT, "rx.log"), "a", buffering=1)
@@ -32,11 +36,32 @@ def open_wav(now):
     wav_t0 = time.time()
 
 
+def open_dcf(now):
+    global dcf, dcf_idx, dcf_t0
+    if dcf:
+        dcf.close(); dcf_idx.close()
+    name = now.strftime("dcf_%Y%m%d_%H%M%S")
+    dcf = open(os.path.join(OUT, name + ".c64"), "wb")
+    dcf_idx = open(os.path.join(OUT, name + ".idx.csv"), "w", buffering=1)
+    dcf_idx.write("sample_n,host_unix\n")
+    dcf_t0 = time.time()
+
+
 while True:
     buf += s.read(8192)
     now_t = time.time()
     i = 0
     while i < len(buf):
+        if buf[i] == 0xA5 and i + 1 < len(buf) and buf[i + 1] == 0x5B:
+            if len(buf) - i < PK2:
+                break
+            n0 = struct.unpack_from("<I", buf, i + 2)[0]
+            if dcf is None or time.time() - dcf_t0 >= 600:
+                open_dcf(utc())
+            dcf.write(buf[i + 6:i + PK2]); dcf.flush()
+            dcf_idx.write(f"{n0},{now_t:.3f}\n")
+            i += PK2
+            continue
         if buf[i] == 0xA5 and i + 1 < len(buf) and buf[i + 1] == 0x5A:
             if len(buf) - i < PK:
                 break

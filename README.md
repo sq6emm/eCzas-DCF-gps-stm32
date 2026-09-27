@@ -88,6 +88,7 @@ the HSI error measured against the LSE. `cpu` is the load of the signal path.
 | `tools/nucleo_logger.py` | serial logger: text lines with host UTC time to `rx.log`; for `AUDIO_DUMP` builds, 10-min 10 kHz WAVs plus an index (sample number ↔ host time) |
 | `tools/prof.py` | carrier spectrum profile (dBc/Hz at 0.5–600 Hz offset); shows clock phase noise |
 | `tools/nucleo_ana.py` | phase of the known preamble bits in slots where the IC-705 saw a time frame: true bit separation and noise |
+| `tools/dcf_assist.py` | DCF77 from the 77.5 kHz channel, assisted by eCzas time: carrier, amplitude-pattern correlation, bit check, phase-code search |
 | `tools/compare3.py` | slot-by-slot comparison of the Nucleo, the Legnica eCzas board and the IC-705 reference |
 
 ## First results (27 Sep 2026, Wrocław)
@@ -124,3 +125,22 @@ Butterworth, 1.03 ms flat delay, subtracted from the frame timing) gave:
 
 The filter also lowered carrier noise from 9–13° to 7–8°. Build with
 `-DNO_IMAGE_FILTER` to leave it out.
+
+## DCF77 on the same antenna (experiment)
+
+A second phase-locked mixer at 77.5 kHz runs next to eCzas (CPU 12 % -> 19 %) and, in
+`AUDIO_DUMP` builds, streams 2 kHz complex baseband. `TIMEMAP` lines every 10 s tie
+the sample count to eCzas time. The ferrite rod is tuned to 225 kHz, so DCF77 arrives
+far below the noise and no ordinary DCF77 decoder could use it. But the Nucleo knows
+UTC from eCzas and can predict the whole DCF77 amplitude pattern (second marks, CEST
+time code, parity). Correlating coherently over many seconds gives
+(`tools/dcf_assist.py`, 27 Sep 2026, 23 min):
+
+- the carrier line where the LSE error (+0.9 ppm, measured against eCzas time) predicts it;
+- the amplitude pattern at **−9 ms** against the Nucleo's eCzas second, **20.6×** the
+  off-peak rms (DCF77 propagation from Mainflingen is about 1.9 ms; the Nucleo's eCzas
+  delay is not calibrated);
+- the predicted bits confirmed by the dip lengths.
+
+The 512-chip phase code (±15.6°) should correlate at only ~3.6σ with 23 min, so it
+needs about 2 h of data.
