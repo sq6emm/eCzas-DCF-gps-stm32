@@ -27,9 +27,9 @@ access more is possible:
   DCF77 is 20–30 dB below what a tuned antenna would give; eCzas-assisted correlation
   finds it anyway (doc/RESULTS.md).
 - **Phase code** (512-chip PRN, x^9+x^5+1, 120 carrier cycles per chip, from 200 ms,
-  inverted for data bit 1): detected at 15σ in 2.5 h (doc/RESULTS.md). Next: resolve
-  the whole-chip offset (PTB's register start state), then track the timing per
-  ~10 min block against eCzas.
+  inverted for data bit 1): detected at 19.8σ in 2.5 h with the exact PTB sequence, unique lag
+  −8.515 ms against the Nucleo's eCzas second (doc/RESULTS.md). Next: track that
+  timing per ~10 min block (day/night, sky wave) and calibrate the absolute delay with GPS.
 - Proper antenna (when available): second ferrite rod with **10 nF + 1.5 nF** in
   parallel (≈78 kHz on a 360 µH rod) on **A1 (PC0)**, same 10k/10k bias and 100 nF
   coupling; firmware: ADC2 in parallel with ADC1.

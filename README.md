@@ -14,7 +14,8 @@ included as the `eczas` submodule.
   time frames next to an IC-705 reference, against ~17 % for the eCzas board at the
   noisy Legnica site. No wrong times.
 - **DCF77:** found through the same (225 kHz-tuned) antenna, assisted by eCzas time:
-  amplitude pattern 53× and the 512-chip phase code at 15σ in 2.5 h.
+  amplitude pattern 53× and the exact 512-chip phase code at 19.8σ in 2.5 h,
+  8.5 ms ahead of the Nucleo's (uncalibrated) eCzas second.
 - **GPS, OCXO:** planned, see [PLAN.md](PLAN.md).
 
 Details: [doc/RESULTS.md](doc/RESULTS.md).

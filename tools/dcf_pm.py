@@ -50,3 +50,37 @@ nm, sh = best[0][1], best[0][2]
 cc = [r[2] for r in res if r[0] == nm and r[1] == sh][0]
 L = np.argmax(np.abs(cc))
 print("  best candidate around its peak, 0.5 ms steps:", " ".join(f"{v/sigma:+.1f}" for v in cc[max(0, L - 6):L + 7]))
+
+# --- the exact DCF77 sequence (PTB-Mitteilungen 114 (2004) 4.3; generator as in C. Vorberg,
+# Diplomarbeit HS Mittweida, Anlage 2): 9-stage register from state 0, a 1 shifted in
+# first (start flip-flop), chip = stage5 XOR stage9, fed back; restarted 200 ms into the second.
+def dcf77_prn():
+    sr, b1, out = 0, 1, []
+    for _ in range(512):
+        sr = ((sr << 1) | b1) & 0x1FF
+        b1 = ((sr >> 4) & 1) ^ ((sr >> 8) & 1)
+        out.append(b1)
+    return np.array(out)
+prn = dcf77_prn()
+print("DCF77 PRN first chips:", "".join(map(str, prn[:32])), "ones", prn.sum())
+# phase-code bits: seconds 0-9 inverted (minute marker), 10-14 not inverted, 15-58 = time code
+sec = d["sec"]
+pb = bit.copy()
+pb[(sec >= 0) & (sec <= 9)] = 1
+pb[(sec >= 10) & (sec <= 14)] = 0
+pb[sec == 59] = -9
+D2 = q[pb == 0].mean(0) - q[pb == 1].mean(0)
+print(f"phase-code bits: {(pb == 0).sum()} x 0, {(pb == 1).sum()} x 1 (seconds 0-14 now included)")
+k2 = np.floor((tt - 0.2) / chip).astype(int)
+ok2 = (tt >= 0.2) & (k2 < 512)
+w = np.zeros(int(FS)); w[ok2] = 1 - 2 * prn[k2[ok2]]; w -= w.mean()
+lags = np.arange(-400, 401)                                # +-200 ms, 0.5 ms steps
+cc = np.array([np.dot(np.roll(D2, -L), w) for L in lags]) / np.sqrt(np.dot(w, w))
+sig = 1.4826 * np.median(np.abs(cc - np.median(cc)))
+kb = np.argmax(np.abs(cc))
+y1, y2, y3 = np.abs(cc[kb - 1: kb + 2])
+frac = 0.5 * (y1 - y3) / (y1 - 2 * y2 + y3)
+print(f"exact sequence: peak {cc[kb]/sig:+.1f} sigma at lag {(lags[kb] + frac) / FS * 1e3:+.3f} ms "
+      f"(DCF77 later than the Nucleo eCzas second = +); next best outside +-2 ms: "
+      f"{np.max(np.abs(cc[np.abs(lags - lags[kb]) > 4])) / sig:.1f} sigma")
+print("  around the peak (0.5 ms):", " ".join(f"{v/sig:+.1f}" for v in cc[kb - 6: kb + 7]))

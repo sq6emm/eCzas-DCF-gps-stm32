@@ -79,5 +79,32 @@ Phase code details:
   uncalibrated receive delay of the Nucleo's e-CzasPL timescale (or of the DCF77 path).
   To be calibrated against GPS PPS (see PLAN.md).
 
+### Exact sequence: whole-chip offset resolved
+
+The sequence is defined in PTB-Mitteilungen 114 (2004), Heft 4, section 4.3
+("Zeit- und Normalfrequenzverbreitung mit DCF77"):
+- a 9-stage register with outputs 5 and 9 fed back through XOR;
+- restarted from the zero state 0.2 s into every second, with a start flip-flop;
+- one full cycle of 512 chips at 645.83 Hz;
+- non-inverted sequence = 0, inverted = 1;
+- **seconds 0–9 always inverted** (minute marker), seconds 10–14 carry no data (not
+  inverted), from second 15 the same bits as the AM time code.
+
+The generator (register from 0, a 1 shifted in first, chip = stage 5 XOR stage 9)
+follows C. Vorberg, Diplomarbeit, Hochschule Mittweida (appendix 2). Its first chips
+are `00001000110000100111001010101100`, with 256 ones.
+
+With that sequence and those bits (4449 × 0, 4425 × 1), searching ±200 ms:
+
+| | |
+|---|---|
+| peak | **−19.8σ**, unique (next best anywhere 3.4σ) |
+| lag | **−8.515 ms**: the DCF77 phase-code second arrives 8.5 ms *before* the Nucleo's e-CzasPL second |
+| around the peak (0.5 ms steps) | −2.3 / −8.4 / −15.8 / **−19.8** / −15.3 / −6.1 |
+
+The propagation difference (DCF77 ~1.9 ms, e-CzasPL ~0.8 ms from Solec Kujawski) is only
+~1.1 ms. The remaining ~9.6 ms is the Nucleo's uncalibrated e-CzasPL receive delay (or a
+transmitter offset); a GPS PPS will separate the two.
+
 All of this comes through a ferrite rod tuned to 217 kHz, i.e. DCF77 is 20–30 dB below
 what a tuned antenna would give.
