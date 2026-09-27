@@ -54,6 +54,7 @@ typedef struct {
     float  aq_sr, aq_si; int aq_k, aq_n;
     float  last_snr_db;             /* line / mean power of the last search */
     int    searches;
+    float  excl[4]; int n_excl;     /* frequencies rejected by the caller (not this carrier) */
     /* report-period statistics */
     double s_re, s_im, s_dif, s_hz; float last_re, last_im; long s_n, s_upd;
 } coh_trk_t;
@@ -74,5 +75,8 @@ int  coh_push(coh_trk_t *t, float re, float im, float *dr, float *di, float *ir,
 void coh_report(coh_trk_t *t, coh_report_t *r);   /* and start a new period */
 /* eCzas: the '0' level measured by the frame decoder on a decoded frame [cycles, < 0] */
 void coh_level_hint(coh_trk_t *t, float lvl0_cycles);
+/* The line being tracked is not the wanted carrier (e.g. DCF77: no second marks): never
+ * pick it again (+-width) and search anew. */
+void coh_reject(coh_trk_t *t, float width_hz);
 
 #endif

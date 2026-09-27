@@ -4,19 +4,20 @@
 # LIB must hold CMSIS_5, cmsis_device_h7 and stm32h7xx_hal_driver (see README.md).
 LIB  ?= lib
 ECZAS = ../../eczas/Firmware/src/core
+COMMON = ../common
 HAL   = $(LIB)/stm32h7xx_hal_driver
 DEV   = $(LIB)/cmsis_device_h7
 CORE  = $(LIB)/CMSIS_5/CMSIS/Core/Include
 CC    = arm-none-eabi-gcc
 CPU   = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard
 CFLAGS = $(CFLAGS_EXTRA) $(CPU) -O2 -g -Wall -ffunction-sections -fdata-sections -DSTM32H723xx -DUSE_HAL_DRIVER \
-         -Isrc -I$(ECZAS) -I$(HAL)/Inc -I$(DEV)/Include -I$(CORE)
+         -Isrc -I$(COMMON) -I$(ECZAS) -I$(HAL)/Inc -I$(DEV)/Include -I$(CORE)
 LDFLAGS = $(CPU) -T STM32H723ZG.ld --specs=nano.specs --specs=nosys.specs -Wl,--gc-sections -Wl,-Map=build/rx.map -Wl,--print-memory-usage
 HALSRC = hal hal_cortex hal_rcc hal_rcc_ex hal_pwr hal_pwr_ex hal_gpio hal_dma hal_dma_ex hal_adc hal_adc_ex \
          hal_uart hal_uart_ex hal_tim hal_tim_ex hal_flash hal_flash_ex
-SRC = $(wildcard src/*.c) $(ECZAS)/dsp.c $(ECZAS)/frame.c $(ECZAS)/timekeeper.c $(ECZAS)/sintab.c $(DEV)/Source/Templates/system_stm32h7xx.c $(foreach m,$(HALSRC),$(HAL)/Src/stm32h7xx_$(m).c)
+SRC = $(wildcard src/*.c) $(COMMON)/coh.c $(COMMON)/ecz.c $(COMMON)/dcf.c $(ECZAS)/frame.c $(ECZAS)/timekeeper.c $(DEV)/Source/Templates/system_stm32h7xx.c $(foreach m,$(HALSRC),$(HAL)/Src/stm32h7xx_$(m).c)
 OBJ = $(patsubst %.c,build/%.o,$(notdir $(SRC))) build/startup.o
-vpath %.c src $(ECZAS) $(HAL)/Src $(DEV)/Source/Templates
+vpath %.c src $(COMMON) $(ECZAS) $(HAL)/Src $(DEV)/Source/Templates
 all: build/rx.bin
 build/%.o: %.c | build
 	$(CC) $(CFLAGS) -c $< -o $@

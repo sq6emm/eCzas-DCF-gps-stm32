@@ -26,7 +26,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "dsp.h"
+#include "coh.h"
+#include "ecz.h"
+#include "dcf.h"
 #include "frame.h"
 #include "timekeeper.h"
 
@@ -58,7 +60,6 @@ UART_HandleTypeDef huart3;
 #define RX_UART_BAUD 115200
 #endif
 
-static dsp_t g_dsp;
 static tk_t tk;
 static frame_info_t last_fi;
 static int have_last_fi;
@@ -89,11 +90,18 @@ static const char *f1(char *b, double v, int plus)
     sprintf(b, "%s%ld.%ld", t < 0 ? "-" : (plus ? "+" : ""), labs(t) / 10, labs(t) % 10);
     return b;
 }
-static uint64_t audio_n;                  /* 10 kHz samples since start */
+static const char *f3(char *b, double v)     /* 3 decimals (the printf here has no %f) */
+{
+    long long t = llround(v * 1000);
+    unsigned long long a = t < 0 ? (unsigned long long)-t : (unsigned long long)t;
+    sprintf(b, "%s%lu.%03lu", t < 0 ? "-" : "+", (unsigned long)(a / 1000), (unsigned long)(a % 1000));
+    return b;
+}
+static uint64_t n2k;                      /* 2 kHz samples since start: the common time base */
 static void put_line(const char *tag, const char *msg)
 {
     char b[260];
-    unsigned long s10 = (unsigned long)(audio_n / 1000);
+    unsigned long s10 = (unsigned long)(n2k / 200);
     snprintf(b, sizeof b, "[%7lu.%lu] %-7s %s\r\n", s10 / 10, s10 % 10, tag, msg);
     uart_puts(b);
 }
@@ -160,6 +168,9 @@ static void gpio_uart_init(void)
     __HAL_RCC_GPIOA_CLK_ENABLE(); __HAL_RCC_GPIOB_CLK_ENABLE(); __HAL_RCC_GPIOD_CLK_ENABLE();
     g.Pin = GPIO_PIN_0 | GPIO_PIN_14; g.Mode = GPIO_MODE_OUTPUT_PP;   /* LD1 green = locked, LD3 red = frame */
     HAL_GPIO_Init(GPIOB, &g);
+    __HAL_RCC_GPIOE_CLK_ENABLE();
+    g.Pin = GPIO_PIN_1; g.Mode = GPIO_MODE_OUTPUT_PP;                 /* LD2 yellow = DCF77 carrier locked */
+    HAL_GPIO_Init(GPIOE, &g);
     g.Pin = GPIO_PIN_3; g.Mode = GPIO_MODE_ANALOG; g.Pull = GPIO_NOPULL;
     HAL_GPIO_Init(GPIOA, &g);
     __HAL_RCC_USART3_CLK_ENABLE();
@@ -300,25 +311,6 @@ static float mix_c = 1, mix_s = 0, rot_c, rot_s;
 #define F_DCF 77500.0
 static float mx2_c = 1, mx2_s = 0, rt2_c = 1, rt2_s = 0, acc2_r, acc2_i;
 static double pl_cyc2;
-static uint64_t dcf_n;                     /* 2 kHz samples produced */
-static void dcf_emit(float zr, float zi)
-{
-    static float sr, si; static int k;
-    sr += zr; si += zi;
-    if (++k < 5) return;
-    k = 0;
-#ifdef AUDIO_DUMP
-    {   /* packet: A5 5B, u32 index of the first 2 kHz sample, 200 x (float re, float im) */
-        static struct __attribute__((packed)) { uint8_t m0, m1; uint32_t n0; float x[400]; } pk = { 0xA5, 0x5B, 0, {0} };
-        static int pn;
-        if (pn == 0) pk.n0 = (uint32_t)dcf_n;
-        pk.x[2 * pn] = sr; pk.x[2 * pn + 1] = si;
-        if (++pn == 200) { uart_write(&pk, sizeof pk); pn = 0; }
-    }
-#endif
-    dcf_n++;
-    sr = si = 0;
-}
 static void set_mix(double f)
 {
     f_mix = f;
@@ -330,7 +322,6 @@ static void set_mix(double f)
    so the TRUE time of any sample is known by interpolation between captures.
    The mixer phase is set to -2 pi F t_true at every block boundary, so clock
    wander cannot accumulate into carrier phase noise. */
-static uint64_t dsp_base_n;                /* audio sample index of the core's block 1 */
 static int pl_ok;                          /* calibrated: tick of sample k = 200 k + pl_c */
 static int64_t pl_c;
 static double F_true = F_CARRIER;          /* mixer frequency in true Hz */
@@ -354,120 +345,65 @@ static double true_time(int64_t tick)      /* capture units, from the ring */
     int64_t a = (int64_t)cap_tick[j % CAPR], b = (int64_t)cap_tick[(j + 1) % CAPR];
     return (double)j + (double)(tick - a) / (double)(b - a);
 }
-/* 1 kHz shift of the 10 kHz stream: exact 10-step cycle */
-static const float sh_c[10] = { 1, 0.809017f, 0.309017f, -0.309017f, -0.809017f, -1, -0.809017f, -0.309017f, 0.309017f, 0.809017f };
-static const float sh_s[10] = { 0, 0.587785f, 0.951057f, 0.951057f, 0.587785f, 0, -0.587785f, -0.951057f, -0.951057f, -0.587785f };
-static int sh_i;
-static float agc = 1e-3f;                /* audio scale, slow AGC to ~25 % of full scale */
-static int16_t blk[DSP_BLOCK];
-static int blk_n;
-
-/* acquisition FFT over +-500 Hz: 1 kHz complex (sum of 10 of the 10 kHz samples) */
-#define AQ_LEN 8192
-static float aq_re[AQ_LEN], aq_im[AQ_LEN];
-static int aq_n = -1;                    /* -1 = not acquiring */
-static float aq_sr, aq_si; static int aq_k;
-
-static void fft(float *re, float *im, int n)
-{
-    for (int i = 1, j = 0; i < n; i++) {
-        int bit = n >> 1;
-        for (; j & bit; bit >>= 1) j ^= bit;
-        j ^= bit;
-        if (i < j) { float t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; }
-    }
-    for (int len = 2; len <= n; len <<= 1) {
-        float ang = -2.0f * (float)M_PI / len, wr = cosf(ang), wi = sinf(ang);
-        for (int i = 0; i < n; i += len) {
-            float cr = 1, ci = 0;
-            for (int k = 0; k < len / 2; k++) {
-                int a = i + k, b = a + len / 2;
-                float tr = re[b] * cr - im[b] * ci, ti = re[b] * ci + im[b] * cr;
-                re[b] = re[a] - tr; im[b] = im[a] - ti; re[a] += tr; im[a] += ti;
-                float t = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = t;
-            }
-        }
-    }
-}
-
-static void acquisition_done(void)
-{
-    char m[200], b1[16], b2[16];
-    static float pw[AQ_LEN];
-    fft(aq_re, aq_im, AQ_LEN);
-    int best = -1; double sum = 0; int ns = 0;
-    for (int k = 0; k < AQ_LEN; k++) {
-        double f = (k < AQ_LEN / 2 ? k : k - AQ_LEN) * 1000.0 / AQ_LEN;
-        pw[k] = aq_re[k] * aq_re[k] + aq_im[k] * aq_im[k];
-        if (fabs(f) > 450) continue;
-        sum += pw[k]; ns++;
-        if (best < 0 || pw[k] > pw[best]) best = k;
-    }
-    double f = (best < AQ_LEN / 2 ? best : best - AQ_LEN) * 1000.0 / AQ_LEN;
-    double snr = 10 * log10(pw[best] / (sum / ns));
-    if (pl_ok) F_true += f; else set_mix(f_mix + f);   /* put the strongest line on the carrier position */
-    snprintf(m, sizeof m, "carrier search: strongest line %s Hz, %s dB above average -> mixer %lu Hz (clock %+ld ppm)",
-             f1(b1, f, 1), f1(b2, snr, 1), (unsigned long)lround(f_mix),
-             (long)lround((F_CARRIER / f_mix - 1) * 1e6));
-    put_line("SEARCH", m);
-    dsp_init(&g_dsp);                    /* fresh acquisition on the new frequency */
-    dsp_base_n = audio_n - 1 - blk_n;    /* the core counts blocks from here (current sample goes to blk[blk_n]) */
-    aq_n = -1;
-}
-
-/* one DMA block: mix, decimate, shift to 1 kHz, feed the core */
-static double dec_pos;                   /* input samples still owed to the current 10 kHz output */
-static float acc_r, acc_i;
-static void emit_sample(float zr, float zi)
-{
-    audio_n++;
-    if (aq_n >= 0) {                      /* acquisition: 1 kHz complex samples */
-        aq_sr += zr; aq_si += zi;
-        if (++aq_k == 10) {
-            aq_re[aq_n] = aq_sr; aq_im[aq_n] = aq_si; aq_sr = aq_si = 0; aq_k = 0;
-            if (++aq_n == AQ_LEN) acquisition_done();
-        }
-    }
-#ifndef NO_IMAGE_FILTER
-    {   /* complex low-pass +-400 Hz around the carrier (4th-order Butterworth,
-           1.03 ms flat delay): without it, taking the real part below folds the
-           noise of the image side (-1 kHz) onto the signal, +3 dB noise */
-        static const float B[2][3] = { { 1.83216023e-04f, 3.66432047e-04f, 1.83216023e-04f }, { 1, 2, 1 } };
-        static const float A[2][2] = { { -1.57523998f, 0.626334259f }, { -1.76882786f, 0.826201333f } };
-        static float sr[2][2], si[2][2];
-        for (int k = 0; k < 2; k++) {
-            float yr = B[k][0] * zr + sr[k][0], yi = B[k][0] * zi + si[k][0];
-            sr[k][0] = B[k][1] * zr - A[k][0] * yr + sr[k][1]; si[k][0] = B[k][1] * zi - A[k][0] * yi + si[k][1];
-            sr[k][1] = B[k][2] * zr - A[k][1] * yr;            si[k][1] = B[k][2] * zi - A[k][1] * yi;
-            zr = yr; zi = yi;
-        }
-    }
-#endif
-    float y = zr * sh_c[sh_i] - zi * sh_s[sh_i];     /* carrier to +1 kHz, real part */
-    if (++sh_i == 10) sh_i = 0;
-    float a = fabsf(y) * agc;
-    agc *= (a > 12000.0f) ? 0.999f : 1.0001f;
-    float v = y * agc;
-    if (v > 32000) v = 32000;
-    if (v < -32000) v = -32000;
-    blk[blk_n++] = (int16_t)v;
+/* ---- the two stations: same structure, separate state, no data between them ----
+ * mixer (phase-locked to true time, fixed nominal frequency) -> sum over exactly 0.5 ms of
+ * true time -> 2 kHz complex -> own carrier tracker (coh.c) -> own timing:
+ *   e-CzasPL: 500 Hz carrier-relative phase -> ecz.c -> frame.c / timekeeper.c
+ *   DCF77:    derotated 2 kHz baseband -> dcf.c (second mark, minute, phase code) */
+static coh_trk_t trk_e, trk_d;
+static ecz_t ez;
+static dcf_t dcf;
+static int dcf_blocks_locked; static float dcf_line_hz = 1e9f;
+static void dcf_report(void);
 #ifdef AUDIO_DUMP
-    {   /* packet: A5 5A, u32 sample index of the first sample, 200 x int16 */
-        static struct __attribute__((packed)) { uint8_t m0, m1; uint32_t n0; int16_t x[200]; } pk = { 0xA5, 0x5A, 0, {0} };
-        static int pn;
-        if (pn == 0) pk.n0 = (uint32_t)(audio_n - 1);
-        pk.x[pn++] = (int16_t)v;
-        if (pn == 200) { uart_write(&pk, sizeof pk); pn = 0; }
-    }
+static void dump(uint8_t type, float zr, float zi)
+{   /* packet: A5 <type>, u32 index of the first 2 kHz sample, 200 x (float re, float im);
+       type 5B = DCF77, 5C = e-CzasPL (both the mixer output, before the trackers) */
+    typedef struct __attribute__((packed)) { uint8_t m0, m1; uint32_t n0; float x[400]; } pk_t;
+    static pk_t pk[2] = { { 0xA5, 0x5B, 0, {0} }, { 0xA5, 0x5C, 0, {0} } };
+    static int pn[2];
+    int w = type == 0x5C;
+    if (pn[w] == 0) pk[w].n0 = (uint32_t)n2k;
+    pk[w].x[2 * pn[w]] = zr; pk[w].x[2 * pn[w] + 1] = zi;
+    if (++pn[w] == 200) { uart_write(&pk[w], sizeof pk[w]); pn[w] = 0; }
+}
 #endif
-    if (blk_n == DSP_BLOCK) { blk_n = 0; dsp_block(&g_dsp, blk); }
+static void station_samples(float er, float ei, float dr, float di)
+{
+    float a, b, ir, ii;
+#ifdef AUDIO_DUMP
+    dump(0x5C, er, ei); dump(0x5B, dr, di);
+#endif
+    if (coh_push(&trk_e, er, ei, &a, &b, &ir, &ii))
+        ecz_push(&ez, (int16_t)lrintf(atan2f(ii, ir) * (32768.0f / (float)M_PI)));
+    coh_push(&trk_d, dr, di, &a, &b, &ir, &ii);
+    dcf_push(&dcf, a, b, trk_d.state == COH_TRACK);
+    n2k++;
+    if (dcf_block_ready(&dcf)) {
+        dcf_block(&dcf);
+        /* carrier check: a DCF77 carrier has second marks; none 60 min after locking
+         * onto a line -> it is something else (a local spur): reject it, search again */
+        if (trk_d.state != COH_SEARCH) {
+            if (fabsf((float)trk_d.hz - dcf_line_hz) > 0.05f) { dcf_line_hz = (float)trk_d.hz; dcf_blocks_locked = 1; }
+            else dcf_blocks_locked++;
+        }
+        if (dcf_blocks_locked >= 6 && dcf.mark_sigma < 6) {
+            char m[80], b1[16];
+            snprintf(m, sizeof m, "carrier at %s Hz has no second marks - rejected, searching", f1(b1, trk_d.hz, 1));
+            put_line("DCF77", m);
+            coh_reject(&trk_d, 0.05f); dcf_blocks_locked = 0; memset(dcf.yr, 0, sizeof dcf.yr);
+        }
+        dcf_report();
+    }
 }
 
-/* one DMA block: mix, then sum over exactly 100 us of TRUE time per output
-   sample (100 x clock ratio input samples; the fractional sample is split) */
+/* one DMA block: both mixers, then sums over exactly 500 us of TRUE time
+   (500 x clock ratio input samples; the fractional sample is split) */
+static double dec_pos;
+static float acc_r, acc_i;
 static void process_block(const uint16_t *b, float mean)
 {
-    double step = 100.0 * cur_tps_ratio;  /* input samples per true 100 us */
+    double step = 500.0 * cur_tps_ratio;  /* input samples per true 500 us */
     for (int n = 0; n < BLOCK; n++) {
         float x = (float)b[n] - mean;
         float xr = x * mix_c, xi = x * mix_s;
@@ -480,8 +416,7 @@ static void process_block(const uint16_t *b, float mean)
             acc_r += xr; acc_i += xi; acc2_r += x2r; acc2_i += x2i; dec_pos += 1.0;
         } else {                           /* split it between this output and the next */
             float f = (float)(step - dec_pos);
-            emit_sample(acc_r + f * xr, acc_i + f * xi);
-            dcf_emit(acc2_r + f * x2r, acc2_i + f * x2i);
+            station_samples(acc_r + f * xr, acc_i + f * xi, acc2_r + f * x2r, acc2_i + f * x2i);
             acc_r = (1 - f) * xr; acc_i = (1 - f) * xi;
             acc2_r = (1 - f) * x2r; acc2_i = (1 - f) * x2i;
             dec_pos = 1.0 - f;
@@ -492,24 +427,18 @@ static void process_block(const uint16_t *b, float mean)
 }
 
 /* ---------------------------------------------------------------- frames */
-static int64_t sample_tick(uint64_t n)    /* the 10 kHz stream runs on crystal time */
-{
-    return (int64_t)n * TICKS_PER_SAMPLE;
-}
-static int64_t now_tick(void) { return sample_tick(audio_n); }
+/* ticks (FCY_HZ units of the eCzas core) of true time: 2 kHz sample n = n * 20000 */
+static int64_t now_tick(void) { return (int64_t)n2k * (TICKS_PER_BLOCK / 4); }
 
 static void handle_candidate(void)
 {
-    dsp_cand_t *c = &g_dsp.cand;
+    dsp_cand_t *c = &ez.cand;
     frame_info_t fi;
     char m[240], d1[40], b1[16];
-    int64_t tick = sample_tick(dsp_base_n + (uint64_t)(c->start_block - 1) * DSP_BLOCK);
-#ifndef NO_IMAGE_FILTER
-    tick -= FCY_HZ / 1000000 * 1034;     /* the image filter's delay */
-#endif
+    int64_t tick = (int64_t)(c->start_block - 1) * TICKS_PER_BLOCK;   /* 500 Hz block = 4 samples */
     memset(&fi, 0, sizeof fi);
     frame_status_t st = frame_decode(c->ph + CAND_PRE, &fi);
-    if (st == FR_NOT_TIME) { g_dsp.cand_ready = 0; return; }
+    if (st == FR_NOT_TIME) { ez.cand_ready = 0; return; }
     n_heard++;
     if (st == FR_UNCORRECTABLE && have_last_fi) {
         uint32_t n3p;
@@ -527,7 +456,7 @@ static void handle_candidate(void)
                 snprintf(m, sizeof m, "#%lu not decodable, but %d%% agrees with the expected frame: %s%s",
                          (unsigned long)n_heard, sc * 100 / 1024, d1, r == TK_ACCEPTED ? " - confirmed" : "");
                 put_line("FRAME", m);
-                g_dsp.cand_ready = 0;
+                ez.cand_ready = 0;
                 return;
             }
         }
@@ -535,10 +464,11 @@ static void handle_candidate(void)
     if (st != FR_OK) {
         snprintf(m, sizeof m, "#%lu corr %d%% - not decodable (snr %d dB)", (unsigned long)n_heard, c->corr_q10 * 100 / 1024, fi.snr_db);
         put_line("FRAME", m);
-        g_dsp.cand_ready = 0;
+        ez.cand_ready = 0;
         return;
     }
     tick += (int64_t)fi.timing_q15 * TICKS_PER_BLOCK / 32768;
+    coh_level_hint(&trk_e, -fi.lvl_sep / 65536.0f);     /* measured '0' level for the carrier loop */
     int32_t off_ms = 0;
     if (tk.synced) off_ms = (int32_t)((tick - tk_second_tick(&tk, 3UL * fi.n3)) / (FCY_HZ / 1000));
     tk_result_t r = tk_frame(&tk, tick, &fi);
@@ -557,7 +487,28 @@ static void handle_candidate(void)
     }
     put_line("CLOCK", m);
     if (r == TK_ACCEPTED || r == TK_SYNCED || r == TK_STEPPED) { last_fi = fi; have_last_fi = 1; }
-    g_dsp.cand_ready = 0;
+    ez.cand_ready = 0;
+}
+
+/* every 10 min: the DCF77 receiver's own results, plus - for the record only, nothing is
+   fed back - where its second starts relative to the e-CzasPL second */
+static void dcf_report(void)
+{
+    char m[260], b1[16], b2[16], b3[16], b4[16], b5[16], b6[16], cmp[48] = "";
+    if (dcf.have_mark && tk.synced) {
+        double start = (double)((n2k - dcf.mark) / 2000 * 2000 + dcf.mark) + (dcf.pm_sigma > 5 ? dcf.pm_lag_ms * 2.0 : 0);
+        uint32_t sec, us;
+        if (tk_time(&tk, (int64_t)(start * (TICKS_PER_BLOCK / 4)), &sec, &us)) {
+            double ms = us / 1000.0; if (ms > 500) ms -= 1000;
+            snprintf(cmp, sizeof cmp, " | vs e-CzasPL second %s ms", f1(b5, ms, 1));
+        }
+    }
+    snprintf(m, sizeof m, "carrier %s, second mark %s ms of the LSE second (%s sigma), minute %s (%s sigma), phase code %s ms (%s sigma)%s",
+             trk_d.state == COH_TRACK ? "locked" : trk_d.state == COH_PULL ? "pulling in" : "searching",
+             dcf.have_mark ? f1(b1, dcf.mark / 2.0, 0) : "-", f1(b2, dcf.mark_sigma, 0),
+             dcf.have_minute ? "found" : "not yet", f1(b3, dcf.minute_sigma, 0),
+             dcf.pm_sigma > 0 ? f1(b4, dcf.pm_lag_ms, 1) : "-", f1(b6, dcf.pm_sigma, 0), cmp);
+    put_line("DCF77", m);
 }
 
 /* ---------------------------------------------------------------- main */
@@ -570,8 +521,15 @@ int main(void)
     CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk; DWT->CYCCNT = 0; DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
     clock_init();
     gpio_uart_init();
-    uart_puts("\r\n\r\ne-CzasPL 225 kHz receiver on NUCLEO-H723ZG (M2: direct sampling, eCzas core, wide tracking)\r\n");
-    dsp_init(&g_dsp);
+    uart_puts("\r\n\r\ne-CzasPL + DCF77 receiver on NUCLEO-H723ZG (M3: coherent, two independent stations)\r\n");
+    {
+        /* same tracker code, per-station settings (see common/coh.h) */
+        static const coh_cfg_t ce = { COH_ECZAS, 4, 3.0f, 1.0f, 1500, 4, 1024, 40.0f, 25.0f, 30.0f };
+        static const coh_cfg_t cd = { COH_PLAIN, 20000, 0.03f, 0.01f, 6, 500, 512, 2.0f, 40.0f, 600.0f };
+        coh_init(&trk_e, &ce); coh_init(&trk_d, &cd);
+    }
+    ecz_init(&ez);
+    dcf_init(&dcf);
     tk_init(&tk);
     lse_init();
     set_mix(F_CARRIER * FS_NOM_HZ / FS_GUESS_HZ);
@@ -584,10 +542,9 @@ int main(void)
                  (long)lround((cur_tps_ratio - 1) * 1e6), (unsigned long)lround(f_mix));
     } else snprintf(m, sizeof m, "LSE crystal NOT running - no drift correction\r\n");
     uart_puts(m);
-    aq_n = 0;                            /* start with a carrier search */
 
     float mean = 32768.0f;
-    uint64_t next_s = 10000, next_status = 100000, unlocked_since = 0;
+    uint64_t next_s = 2000, next_status = 20000, next_carrier = 120000;
     for (;;) {
         static uint64_t rd;               /* next sample to process */
         uint64_t wr = samples_written();
@@ -632,36 +589,34 @@ int main(void)
         } else if (lse_ok && lse_seq >= 2) {
             pl_calibrate(wr);
             pl_t = true_time(200 * (int64_t)rd + pl_c); pl_cyc = 0;
-            F_true = f_mix * cur_tps_ratio;
+            F_true = F_CARRIER;                /* fixed; the carrier trackers follow the rest */
             pl_ok = 1;
         }
         process_block(b, mean);
-        if (g_dsp.cand_ready) handle_candidate();
+        if (ez.cand_ready) handle_candidate();
         busy_cyc += DWT->CYCCNT - c0;
 
-        if (audio_n >= next_s) {          /* once a second */
-            uint64_t k = next_s / 10000;
-            next_s += 10000;
+        if (n2k >= next_s) {              /* once a second */
+            next_s += 2000;
             blk_ratio_sum = 0; blk_ratio_n = 0;
-            (void)k;
             tk_maintain(&tk, now_tick());
-            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, g_dsp.pll_state == PLL_TRACK ? GPIO_PIN_SET : GPIO_PIN_RESET);
-            /* outer loop: keep the carrier at 1 kHz in the 10 kHz stream */
-            if (g_dsp.pll_state != PLL_ACQ_FLL && aq_n < 0) {
-                double df = dsp_carrier_centihz(&g_dsp) / 100.0 - AUDIO_CARRIER_HZ;
-                if (fabs(df) > 3.0) {
-                    int32_t units = (int32_t)lround(df * 4294967296.0 / ADC_FS_HZ);
-                    if (pl_ok) F_true += df; else set_mix(f_mix + df);
-                    g_dsp.nco_freq -= units;
-                    if (g_dsp.have_lock_freq) g_dsp.lock_freq -= units;
-                }
-            }
-            if (g_dsp.pll_state == PLL_TRACK) unlocked_since = 0;
-            else if (!unlocked_since) unlocked_since = audio_n;
-            if (unlocked_since && aq_n < 0 && audio_n - unlocked_since > 300000) {   /* 30 s */
-                put_line("SEARCH", "no carrier lock for 30 s - searching +-450 Hz");
-                aq_n = 0; aq_k = 0; aq_sr = aq_si = 0; unlocked_since = 0;
-            }
+            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, trk_e.state == COH_TRACK && trk_e.err_avg * 360 < 25 ? GPIO_PIN_SET : GPIO_PIN_RESET);
+            HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1, trk_d.state == COH_TRACK && trk_d.err_avg * 360 < 40 ? GPIO_PIN_SET : GPIO_PIN_RESET);
+        }
+        if (n2k >= next_carrier) {        /* every 60 s: both carriers against the LSE crystal */
+            next_carrier += 120000;
+            coh_report_t re, rd2;
+            coh_report(&trk_e, &re); coh_report(&trk_d, &rd2);
+            char b4[16], b5[16], b6[16], b7[24], b8[24];
+            /* both are measured against the same crystal, so its error cancels in the difference */
+            double ppb = (re.freq_hz / F_CARRIER - rd2.freq_hz / F_DCF) * 1e9;
+            snprintf(m, sizeof m, "eCzas %s mHz C/N0 %s dB-Hz noise %s deg phase %s cyc %s | DCF77 %s mHz C/N0 %s dB-Hz phase %s cyc %s | eCzas-DCF77 %s ppb",
+                     f1(b1, re.freq_hz * 1000, 1), f1(b2, re.cn0_dbhz, 0), f1(b3, re.err_deg, 0), f3(b7, re.phase_cyc),
+                     re.state == COH_TRACK ? "locked" : re.state == COH_PULL ? "pulling in" : "searching",
+                     f1(b4, rd2.freq_hz * 1000, 1), f1(b5, rd2.cn0_dbhz, 0), f3(b8, rd2.phase_cyc),
+                     rd2.state == COH_TRACK ? "locked" : rd2.state == COH_PULL ? "pulling in" : "searching",
+                     (re.state == COH_TRACK && rd2.state == COH_TRACK) ? f1(b6, ppb, 1) : "-");
+            put_line("CARRIER", m);
         }
 #ifdef CLOCK_TEST
         if (lse_log_n == 64) {
@@ -676,30 +631,28 @@ int main(void)
             strcat(t, "\r\n"); uart_puts(t); lse_log_n = 65;
         }
 #endif
-        if (audio_n >= next_status) {     /* every 10 s */
-            next_status += 100000;
-            {   /* map the sample count to eCzas time, for comparing other signals offline */
+        if (n2k >= next_status) {         /* every 10 s */
+            next_status += 20000;
+            {   /* map the sample count to eCzas time (offline comparisons; same format as before) */
                 uint32_t sec, us;
                 if (tk_time(&tk, now_tick(), &sec, &us)) {
                     char t[120];
-                    snprintf(t, sizeof t, "audio sample %lu%09lu = eCzas %lu.%06lu (unix), dcf sample %lu",
-                             (unsigned long)(audio_n / 1000000000ULL), (unsigned long)(audio_n % 1000000000ULL),
-                             (unsigned long)(sec + 946684800UL), (unsigned long)us, (unsigned long)dcf_n);
+                    snprintf(t, sizeof t, "audio sample %lu = eCzas %lu.%06lu (unix), dcf sample %lu",
+                             (unsigned long)n2k, (unsigned long)(sec + 946684800UL), (unsigned long)us, (unsigned long)n2k);
                     put_line("TIMEMAP", t);
                 }
             }
-            static const char *PS[] = { "searching", "locking (fast)", "locking", "locked" };
+            static const char *PS[] = { "searching", "pulling in", "locked" };
             uint32_t sec;
-            char d1[40] = "no time yet";
+            char d1[40] = "no time yet", b4[16];
             if (tk_time(&tk, now_tick(), &sec, 0)) date_str(d1, sec, 0);
-            snprintf(m, sizeof m, "%s | carrier %s, noise %s deg | mixer %lu Hz, clock %+ld ppm (LSE) | heard %lu, decoded %lu, confirmed %lu, rejected %lu | cpu %lu%%, max lag %lu ms%s",
-                     d1, PS[g_dsp.pll_state], f1(b1, (g_dsp.lock_err_avg >> 4) * 360.0 / 65536.0, 0),
-                     (unsigned long)lround(f_mix), (long)lround((cur_tps_ratio - 1) * 1e6),
+            snprintf(m, sizeof m, "%s | eCzas carrier %s %s Hz noise %s deg lvl0 %s | heard %lu, decoded %lu, confirmed %lu, rejected %lu | DCF77 carrier %s %s mHz | clock %+ld ppm (LSE) | cpu %lu%%, max lag %lu ms%s",
+                     d1, PS[trk_e.state], f1(b1, trk_e.hz, 1), f1(b2, trk_e.err_avg * 360, 0), f1(b3, trk_e.lvl0 * 360, 0),
                      (unsigned long)n_heard, (unsigned long)n_decoded, (unsigned long)n_conf, (unsigned long)n_rej,
+                     PS[trk_d.state], f1(b4, trk_d.hz * 1000, 1), (long)lround((cur_tps_ratio - 1) * 1e6),
                      (unsigned long)(busy_cyc / (SystemCoreClock / 10)), (unsigned long)(max_lag / 1000),
                      overruns ? " OVERRUN" : "");
             if (pl_bad) { strcat(m, " PLBAD"); pl_bad = 0; }
-            (void)b2; (void)b3;
             put_line("STATUS", m);
             overruns = 0; busy_cyc = 0; max_lag = 0;
         }

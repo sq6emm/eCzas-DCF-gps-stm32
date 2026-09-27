@@ -2,14 +2,15 @@
 """Log the NUCLEO receiver's serial port: text lines with host UTC time, and
 (AUDIO_DUMP builds) the core's 10 kHz input as 10-minute WAV files plus an index
 of (first sample number, host time) per packet for alignment with other receivers,
-and the DCF77 channel (2 kHz complex float32) as 10-minute .c64 files + index."""
+and the 2 kHz complex float32 streams as 10-minute .c64 files + index: A5 5B = DCF77 (dcf_*),
+A5 5C = e-CzasPL (ecz_*, firmware M3 and later)."""
 import datetime, os, serial, struct, sys, time, wave
 
 DEV, BAUD, OUT = sys.argv[1], int(sys.argv[2]), sys.argv[3]
 PK = 2 + 4 + 400
 PK2 = 2 + 4 + 1600
-dcf = dcf_idx = None
-dcf_t0 = 0
+streams = {0x5B: "dcf", 0x5C: "ecz"}
+files = {}                                   # type -> [file, idx, t0]
 os.makedirs(OUT, exist_ok=True)
 s = serial.Serial(DEV, BAUD, timeout=0.2)
 log = open(os.path.join(OUT, "rx.log"), "a", buffering=1)
@@ -36,15 +37,14 @@ def open_wav(now):
     wav_t0 = time.time()
 
 
-def open_dcf(now):
-    global dcf, dcf_idx, dcf_t0
-    if dcf:
-        dcf.close(); dcf_idx.close()
-    name = now.strftime("dcf_%Y%m%d_%H%M%S")
-    dcf = open(os.path.join(OUT, name + ".c64"), "wb")
-    dcf_idx = open(os.path.join(OUT, name + ".idx.csv"), "w", buffering=1)
-    dcf_idx.write("sample_n,host_unix\n")
-    dcf_t0 = time.time()
+def open_c64(typ, now):
+    if typ in files:
+        files[typ][0].close(); files[typ][1].close()
+    name = now.strftime(streams[typ] + "_%Y%m%d_%H%M%S")
+    f = open(os.path.join(OUT, name + ".c64"), "wb")
+    ix = open(os.path.join(OUT, name + ".idx.csv"), "w", buffering=1)
+    ix.write("sample_n,host_unix\n")
+    files[typ] = [f, ix, time.time()]
 
 
 while True:
@@ -52,14 +52,15 @@ while True:
     now_t = time.time()
     i = 0
     while i < len(buf):
-        if buf[i] == 0xA5 and i + 1 < len(buf) and buf[i + 1] == 0x5B:
+        if buf[i] == 0xA5 and i + 1 < len(buf) and buf[i + 1] in streams:
             if len(buf) - i < PK2:
                 break
+            typ = buf[i + 1]
             n0 = struct.unpack_from("<I", buf, i + 2)[0]
-            if dcf is None or time.time() - dcf_t0 >= 600:
-                open_dcf(utc())
-            dcf.write(buf[i + 6:i + PK2]); dcf.flush()
-            dcf_idx.write(f"{n0},{now_t:.3f}\n")
+            if typ not in files or time.time() - files[typ][2] >= 600:
+                open_c64(typ, utc())
+            files[typ][0].write(buf[i + 6:i + PK2]); files[typ][0].flush()
+            files[typ][1].write(f"{n0},{now_t:.3f}\n")
             i += PK2
             continue
         if buf[i] == 0xA5 and i + 1 < len(buf) and buf[i + 1] == 0x5A:

@@ -65,7 +65,9 @@ static void search_done(coh_trk_t *t)
     for (k = 0; k < n; k++) {
         float f = (k < n / 2 ? k : k - n) * fs / n, pw = t->aq_re[k] * t->aq_re[k] + t->aq_im[k] * t->aq_im[k];
         sum += pw;
-        if (fabsf(f) <= t->c.max_hz && (best < 0 || pw > t->aq_re[best] * t->aq_re[best] + t->aq_im[best] * t->aq_im[best]))
+        int j, excl = 0;
+        for (j = 0; j < t->n_excl; j++) if (fabsf(f - t->excl[j]) <= 0.02f + 2 * fs / n) excl = 1;
+        if (!excl && fabsf(f) <= t->c.max_hz && (best < 0 || pw > t->aq_re[best] * t->aq_re[best] + t->aq_im[best] * t->aq_im[best]))
             best = k;
     }
     t->searches++;
@@ -172,4 +174,12 @@ void coh_report(coh_trk_t *t, coh_report_t *r)
 void coh_level_hint(coh_trk_t *t, float lvl0)
 {
     if (lvl0 > -60.0f / 360 && lvl0 < -20.0f / 360) t->lvl0 += (lvl0 - t->lvl0) * 0.5f;
+}
+
+void coh_reject(coh_trk_t *t, float width_hz)
+{
+    (void)width_hz;
+    if (t->n_excl < 4) t->excl[t->n_excl++] = (float)t->hz;
+    else { memmove(t->excl, t->excl + 1, 3 * sizeof(float)); t->excl[3] = (float)t->hz; }
+    start_search(t);
 }

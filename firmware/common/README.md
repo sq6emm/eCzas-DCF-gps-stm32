@@ -39,3 +39,12 @@ times were 0 in every run.
 The coherent chain decodes more frames outright at every level. In moderately weak signals it gets
 20–32 % more time frames. At the extreme (−4 dB) it is slightly behind. The NUCLEO files here are
 the old firmware's audio (after its image filter and AGC); live, the chain gets the raw baseband.
+
+## DCF77 on its own (`dcf.c`, host `dcfsim` on 5 h of recorded data, 27 Sep 2026)
+
+This runs without any e-CzasPL input. It keeps the carrier, finds the second mark in about 10 min
+(12σ, later 24–50σ) and the minute after hours at this signal level (~0 dB-Hz through the 217 kHz
+ferrite). The first search locked onto a local spur at −1.734 Hz. It was rejected after 60 min
+without second marks, and the real carrier was then found at −56…−94 mHz. For comparison only,
+the DCF77 second mark lies −11…−16 ms from the e-CzasPL second, consistent with the
+eCzas-assisted phase-code result (−8.5 ms) and the amplitude result (−11 ms).

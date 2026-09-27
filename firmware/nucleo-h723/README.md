@@ -1,4 +1,37 @@
-# NUCLEO-H723ZG firmware: e-CzasPL + DCF77 receiver
+# NUCLEO-H723ZG firmware: e-CzasPL + DCF77 receiver (M3, coherent)
+
+Since 27 Sep 2026 22:51 UTC (M3) the receiver no longer imitates the SI4735. Two independent
+stations share only the ADC samples and the time base:
+
+```
+A0 -> ADC 1 Msps -> per station: mixer phase-locked to true (LSE) time, fixed at 225.000 / 77.500 kHz
+   -> sum over exactly 0.5 ms of true time -> 2 kHz complex
+   -> own carrier tracker (../common/coh.c: FFT search -> PLL; same code, per-station settings)
+        e-CzasPL: 2 ms steps, ~1 Hz loop, decision-directed on the two data levels
+                  -> carrier-relative phase at 500 Hz -> ../common/ecz.c -> frame.c / timekeeper.c
+        DCF77:    10 s steps, ~0.01 Hz loop, lines without second marks are rejected as spurs
+                  -> ../common/dcf.c: second mark, minute, phase code
+```
+
+Output lines (besides FRAME / CLOCK / TIMEMAP):
+- `STATUS` every 10 s: time, eCzas carrier (state, offset, loop noise, '0' level), frame
+  counts, DCF77 carrier state, clock error, CPU load.
+- `CARRIER` every 60 s, for each station: frequency and phase against the crystal, C/N0 and
+  state. It also gives the eCzas−DCF77 difference in ppb, where the crystal's error cancels.
+- `DCF77` every 10 min: the second mark (ms of the LSE second, σ), the minute and the phase
+  code (σ). For the record it also gives where the DCF77 second starts relative to the e-CzasPL
+  second; nothing is fed back.
+
+LEDs: LD1 green = eCzas carrier locked, LD2 yellow = DCF77 carrier locked, LD3 red = toggles
+on every decoded eCzas frame.
+
+Dumps (`-DAUDIO_DUMP`, 921600 baud): both mixer outputs as 2 kHz complex float32 packets
+(`A5 5B` DCF77, `A5 5C` e-CzasPL); `tools/nucleo_logger.py` writes `dcf_*.c64` / `ecz_*.c64`.
+
+Host tests: `../host` (`cohsim` against the old core, `dcfsim` on recorded DCF77 data), results
+in `../common/README.md`.
+
+The description below is of M2 (SI4735 imitation), kept for the history.
 
 A test port of the receiver: the 225 kHz signal is sampled directly by the STM32H723's
 ADC, turned into the same 10 kHz "audio" (carrier at 1 kHz) that the SI4735 gives the
