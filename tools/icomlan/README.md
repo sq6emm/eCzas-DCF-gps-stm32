@@ -16,6 +16,8 @@ instead of demodulated AF.
 | `if2af_watch.py` | converts every finished IF file into the input directory of the eCzas reference pipeline |
 | `cmp_usb_lan.py` | same time window, USB AF recording vs LAN IF, both through the eCzas firmware simulator |
 | `spec.py` | spectrum / strongest lines of a recording |
+| `dcf7610.py` | IC-7610 SUB (DCF77) -> 2 kHz complex files, hourly `dcfsim` + `dcfminsim` (the NUCLEO code) |
+| `k9ay_scan.sh`, `k9ay_analyse.py` | K9AY direction / LNA scan during one IC-7610 recording, C/N0 per setting |
 
 Run (credentials are the radio's *Network User* settings, not stored here):
 
@@ -33,3 +35,14 @@ Notes
   decoded, WLAN IF 18 (73 vs 61 candidates). WLAN: 0 packets lost in 60001 (6 retransmitted).
   A first two-sided conversion (plain real part) gave only 7: the band below the dial folded
   onto the carrier.
+
+IC-7610 (28 Sep 2026, Ethernet 192.168.253.4)
+- The LAN IF is MIRRORED (unlike the IC-705), in USB and LSB alike: RF f -> 12 kHz - (f - dial).
+  Dials 1 kHz above the stations put both carriers at 13000 Hz: MAIN 226.000 kHz (e-CzasPL),
+  SUB 78.500 kHz (DCF77), USB, FIL1. `ifconv.if_to_usb(..., invert=True)` / `--invert` conjugates
+  at 0 Hz; the e-CzasPL simulator decodes 27 time frames in 9 min inverted, 0 upright.
+- Codec 0x10 (PCM16 stereo, 48 kHz): left = MAIN, right = SUB; -29 dB MAIN->SUB crosstalk.
+- Levels, 28 Sep ~19:45-19:55 UTC, K9AY (BPF bypassed): e-CzasPL 50-55 dB-Hz in every direction
+  (AGC holds it at -18 dBFS); DCF77 is receiver-noise limited (N0 flat): NW+LNA 26.8, NE+LNA 26.4,
+  SW 23.7, SE 23.6 ... NW 11.7 dB-Hz. Preamp on DCF77: P2 26.2, P1 21.0, off 16.9 dB-Hz; ATT 6/12/18 dB
+  costs 3/8/13 dB. Chosen: K9AY 3074 (NW+LNA), P2, ATT off.
