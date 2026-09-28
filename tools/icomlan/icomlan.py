@@ -287,6 +287,7 @@ class Recorder:
         # timing guard: the radio sometimes drops audio without a sequence gap (WLAN congestion);
         # arrival time vs samples written shows it -> silence is inserted, the file time stays right
         self.arr = {}; self.t0 = None; self.lags = []; self.inserted = 0
+        self.last_audio = None
 
     def add(self, seq, pcm, stream):
         self.pkts += 1
@@ -396,7 +397,7 @@ def main():
                 if s.common(d): continue
                 if s is rad.aud:
                     if len(d) >= 0x20 and d[4] != 1:
-                        rec.add(struct.unpack_from("<H", d, 6)[0], d[0x18:], s)
+                        rec.add(struct.unpack_from("<H", d, 6)[0], d[0x18:], s); rec.last_audio = now
                 elif s is rad.civ:
                     if len(d) > 0x15 and d[0x10] == 0xc1:
                         fr, civbuf = civ_frames(civbuf + d[0x15:])
@@ -414,6 +415,8 @@ def main():
                 if now >= p[2]: rad.civ_send(p[1]); p[2] = now + p[0]
             if now - rad.aud.last_rx > 10:
                 raise RuntimeError("audio: nothing received for 10 s")
+            if now - (rec.last_audio or t0) > 10:            # pings alone keep last_rx fresh (28 Sep 11:39)
+                raise RuntimeError("audio: no audio packets for 10 s (radio still answering)")
             if now >= next_stats:
                 dt = now - st0[0]
                 rate = (rec.samples - st0[1]) / dt
