@@ -10,8 +10,8 @@ from matplotlib.backends.backend_pdf import PdfPages
 import schemdraw, schemdraw.elements as elm
 
 BLUE, GREY = "#1f4e79", "#666"
-L = 360e-6
-f0 = lambda C: 1 / (2 * math.pi * math.sqrt(L * C))
+L1, L2 = 360e-6, 375e-6        # measured: rod on A0 (with 1.5 nF: 217 kHz), second rod bare 375 uH
+f0 = lambda C, L: 1 / (2 * math.pi * math.sqrt(L * C))
 schemdraw.config(fontsize=11)
 d = schemdraw.Drawing(show=False, unit=3)
 
@@ -28,7 +28,7 @@ def tank(x, c_label, rod_label, pin_label):
 
 
 tank(0.0, "C1\n1.2 nF\n+ 180 pF\nC0G", "ROD 1\n360 µH", "A0  (CN9 pin 1)\ne-CzasPL 225 kHz")
-tank(6.5, "C2\n10 nF\n+ 1.8 nF\nC0G / film", "ROD 2\n360 µH", "A1  (CN9 pin 3)\nDCF77 77.5 kHz")
+tank(6.5, "C2\n10 nF\n+ 1.2 nF\nC0G / film", "ROD 2\n375 µH", "A1  (CN9 pin 3)\nDCF77 77.5 kHz")
 d.add(elm.Line().at((0, 0)).to((14.5, 0)))
 d.add(elm.Label().at((10.9, -0.45)).label("bias node 1.65 V", halign="center", color=BLUE))
 # shared bias: divider and decoupling
@@ -48,12 +48,12 @@ with PdfPages("/o/nucleo_225_77kHz_input.pdf") as pdf:
     fig.text(0.07, 0.955, "Two ferrite rods to NUCLEO-H723ZG: e-CzasPL on A0, DCF77 on A1", fontsize=12.5, weight="bold", color=BLUE)
     fig.text(0.07, 0.935, "One shared 1.65 V bias node, no coupling capacitors (replaces nucleo_225kHz_input.pdf)", fontsize=9.5, color=GREY)
     ax = fig.add_axes([0.05, 0.615, 0.90, 0.31]); ax.axis("off"); ax.imshow(plt.imread("/o/sch2.png"))
-    c1, c2 = 1.2e-9 + 180e-12, 10e-9 + 1.8e-9
+    c1, c2 = 1.2e-9 + 180e-12, 10e-9 + 1.2e-9
     notes = [
         ("Parts", True),
-        ("  ROD 1, ROD 2: the same ferrite rod type (12 cm, about 360 µH; the rod on A0 today)", False),
-        (f"  C1 = 1.2 nF + 180 pF in parallel (1.38 nF) -> {f0(c1)/1e3:.1f} kHz         (today: 1.5 nF = {f0(1.5e-9)/1e3:.1f} kHz)", False),
-        (f"  C2 = 10 nF + 1.8 nF in parallel (11.8 nF) -> {f0(c2)/1e3:.1f} kHz          (10 nF + 1.5 nF would be {f0(11.5e-9)/1e3:.1f} kHz)", False),
+        ("  ROD 1: the rod on A0 today (12 cm, 360 µH);  ROD 2: the second rod, measured 375 µH (bare coil)", False),
+        (f"  C1 = 1.2 nF + 180 pF in parallel (1.38 nF) -> {f0(c1, L1)/1e3:.1f} kHz         (today: 1.5 nF = {f0(1.5e-9, L1)/1e3:.1f} kHz)", False),
+        (f"  C2 = 10 nF + 1.2 nF in parallel (11.2 nF) -> {f0(c2, L2)/1e3:.1f} kHz          (ideal 11.25 nF; 10 nF + 1.5 nF would be {f0(11.5e-9, L2)/1e3:.1f} kHz)", False),
         ("  C1, C2: C0G/NP0 ceramic, polystyrene or polypropylene film (stable, low loss; not X7R)", False),
         ("  R1, R2 = 10 k;  C3 = 1 µF ceramic, optionally + 100 nF, close to the rods' bias ends", False),
         ("", False),
