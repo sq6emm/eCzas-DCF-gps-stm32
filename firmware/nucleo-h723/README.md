@@ -22,8 +22,20 @@ Output lines (besides FRAME / CLOCK / TIMEMAP):
   code (σ). For the record it also gives where the DCF77 second starts relative to the e-CzasPL
   second; nothing is fed back.
 
-LEDs: LD1 green = eCzas carrier locked, LD2 yellow = DCF77 carrier locked, LD3 red = toggles
-on every decoded eCzas frame.
+- `OCXO` every minute (`-DOCXO_REF` build only): EFC DAC code and volts, loop state, source
+  (DCF77 / e-CzasPL / none), the station's offset against the OCXO (ppb), the loop's time error
+  (ns) and the measured EFC slope (ppb per DAC code). See `common/efc.h`.
+
+LEDs:
+
+| LED | steady on | short blink (300 ms, inverted) | off |
+|---|---|---|---|
+| LD1 green, e-CzasPL | carrier locked (loop noise < 25°) | a correctly decoded frame | carrier not locked |
+| LD2 yellow, DCF77 | carrier locked and verified by the second marks | a decoded minute (confirmed, confirmed by the expected frame, or unconfirmed) | carrier not verified |
+| LD3 red, OCXO | locked (PLL on DCF77 or e-CzasPL) | 1 Hz: calibrating, moving to the calibrated code, or holdover (no carrier) | waiting for a carrier, or FAILED (EFC not responding); always off in the LSE build |
+
+"Inverted" means that a locked LED goes dark for 300 ms at a decode, and an unlocked one lights
+for 300 ms (a frame can still be decoded while the loop noise is above 25°).
 
 Dumps (`-DAUDIO_DUMP`, 921600 baud): both mixer outputs as 2 kHz complex float32 packets
 (`A5 5B` DCF77, `A5 5C` e-CzasPL); `tools/nucleo_logger.py` writes `dcf_*.c64` / `ecz_*.c64`.
@@ -53,7 +65,7 @@ frame.c, timekeeper.c, from the `eczas` submodule). No radio chip, only an anten
   Tested: ferrite rod (12 cm, 360 µH) with 1.5 nF across it (resonance about 217 kHz),
   20 cm twisted pair to the board. An untuned antenna mostly brings in aliased
   medium-wave noise.
-- LED LD1 shows carrier lock. Output is on the ST-LINK virtual COM port.
+- LEDs: see the table above. Output is on the ST-LINK virtual COM port.
 
 ## Signal path
 

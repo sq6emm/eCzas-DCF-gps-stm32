@@ -174,10 +174,10 @@ static void gpio_uart_init(void)
 {
     GPIO_InitTypeDef g = {0};
     __HAL_RCC_GPIOA_CLK_ENABLE(); __HAL_RCC_GPIOB_CLK_ENABLE(); __HAL_RCC_GPIOD_CLK_ENABLE();
-    g.Pin = GPIO_PIN_0 | GPIO_PIN_14; g.Mode = GPIO_MODE_OUTPUT_PP;   /* LD1 green = locked, LD3 red = frame */
+    g.Pin = GPIO_PIN_0 | GPIO_PIN_14; g.Mode = GPIO_MODE_OUTPUT_PP;   /* LD1 green = e-CzasPL, LD3 red = OCXO (see README) */
     HAL_GPIO_Init(GPIOB, &g);
     __HAL_RCC_GPIOE_CLK_ENABLE();
-    g.Pin = GPIO_PIN_1; g.Mode = GPIO_MODE_OUTPUT_PP;                 /* LD2 yellow = DCF77 carrier locked */
+    g.Pin = GPIO_PIN_1; g.Mode = GPIO_MODE_OUTPUT_PP;                 /* LD2 yellow = DCF77 (see README) */
     HAL_GPIO_Init(GPIOE, &g);
     g.Pin = GPIO_PIN_3; g.Mode = GPIO_MODE_ANALOG; g.Pull = GPIO_NOPULL;
     HAL_GPIO_Init(GPIOA, &g);
@@ -285,7 +285,7 @@ TIM_HandleTypeDef htim16;
 #define LSE_WIN 4000                     /* captures per measurement: 1 s */
 #endif
 #ifndef EFC_INIT
-#define EFC_INIT 2048                    /* DAC code at start (mid-scale) */
+#define EFC_INIT 2310                    /* DAC code at start: this OCXO (28 Sep: 162 ppb slow at 2048) */
 #endif
 #else
 #define REF_TIM      TIM16
@@ -482,6 +482,11 @@ static void dump(uint8_t type, float zr, float zi)
 }
 #endif
 static int64_t now_tick(void);
+/* LEDs: LD1 e-CzasPL, LD2 DCF77 - on while the carrier is locked, a 300 ms blink (inverted)
+   at every correctly decoded frame / minute; LD3 OCXO - on = locked, 1 Hz blink = calibrating,
+   moving to the calibrated code or holdover, off = waiting or failed (non-OCXO build: off) */
+static uint64_t led1_until, led2_until;    /* n2k at which the LD1 / LD2 blink ends */
+#define LED_BLINK 600                      /* 2 kHz samples = 300 ms */
 /* one line per decoded DCF77 minute; the e-CzasPL time is only compared, never used */
 static void dcf_time_report(void)
 {
@@ -489,6 +494,7 @@ static void dcf_time_report(void)
     char m[240], cmp[64] = "", b1[16], b2[16];
     uint32_t sec, us;
     if (dcfb.status == DCFT_CONFIRMED || dcfb.status == DCFT_PREDICTED || dcfb.status == DCFT_UNCONFIRMED) {
+        led2_until = n2k + LED_BLINK;
         /* the code is the time of the next minute, which starts ~1 s after second 58 ends */
         if (tk_time(&tk, now_tick() + 1 * (int64_t)FCY_HZ, &sec, &us)) {
             int64_t ez_min = ((int64_t)sec + 30) / 60;
@@ -623,7 +629,7 @@ static void handle_candidate(void)
     if (tk.synced) off_ms = (int32_t)((tick - tk_second_tick(&tk, 3UL * fi.n3)) / (FCY_HZ / 1000));
     tk_result_t r = tk_frame(&tk, tick, &fi);
     n_decoded++;
-    HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
+    led1_until = n2k + LED_BLINK;
     date_str(d1, 3UL * fi.n3, fi.tz);
     snprintf(m, sizeof m, "#%lu corr %d%% snr %d dB, fixed %u%s: %s", (unsigned long)n_heard, c->corr_q10 * 100 / 1024,
              fi.snr_db, fi.rs_fixed, fi.chase_flips ? " + soft retry" : "", d1);
@@ -756,6 +762,13 @@ int main(void)
             pl_ok = 1;
         }
         process_block(b, mean, mean2);
+        {   /* LD1 / LD2: carrier locked, inverted for LED_BLINK after a decode */
+            int l1 = trk_e.state == COH_TRACK && trk_e.err_avg * 360 < 25, l2 = dcf_verified();
+            if (n2k < led1_until) l1 = !l1;
+            if (n2k < led2_until) l2 = !l2;
+            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, l1 ? GPIO_PIN_SET : GPIO_PIN_RESET);
+            HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1, l2 ? GPIO_PIN_SET : GPIO_PIN_RESET);
+        }
 #ifdef OCXO_REF
         efc_set((uint32_t)efc_tick(&efc, BLOCK / FS_NOM_HZ));   /* ramp + dither, once per block */
 #endif
@@ -766,8 +779,12 @@ int main(void)
             next_s += 2000;
             blk_ratio_sum = 0; blk_ratio_n = 0;
             tk_maintain(&tk, now_tick());
-            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, trk_e.state == COH_TRACK && trk_e.err_avg * 360 < 25 ? GPIO_PIN_SET : GPIO_PIN_RESET);
-            HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1, dcf_verified() ? GPIO_PIN_SET : GPIO_PIN_RESET);
+#ifdef OCXO_REF
+            /* LD3 red: on = OCXO locked, blinking = calibrating / moving / holdover, off = waiting or failed */
+            if (efc.state == EFC_LOCK && !efc.skip && efc.src != EFC_SRC_NONE) HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_SET);
+            else if (efc.state == EFC_CAL_RAMP || efc.state == EFC_CAL_MEAS || efc.state == EFC_LOCK) HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
+            else HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_RESET);
+#endif
         }
         if (n2k >= next_carrier) {        /* every 60 s: both carriers against the LSE crystal */
             next_carrier += 120000;
