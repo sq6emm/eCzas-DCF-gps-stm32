@@ -45,9 +45,9 @@ d.save("/o/sch2.png", dpi=220)
 
 with PdfPages("/o/nucleo_225_77kHz_input.pdf") as pdf:
     fig = plt.figure(figsize=(8.27, 11.69))
-    fig.text(0.07, 0.955, "Two ferrite rods to NUCLEO-H723ZG: e-CzasPL on A0, DCF77 on A1", fontsize=14.5, weight="bold", color=BLUE)
+    fig.text(0.07, 0.955, "Two ferrite rods to NUCLEO-H723ZG: e-CzasPL on A0, DCF77 on A1", fontsize=12.5, weight="bold", color=BLUE)
     fig.text(0.07, 0.935, "One shared 1.65 V bias node, no coupling capacitors (replaces nucleo_225kHz_input.pdf)", fontsize=9.5, color=GREY)
-    ax = fig.add_axes([0.05, 0.60, 0.90, 0.32]); ax.axis("off"); ax.imshow(plt.imread("/o/sch2.png"))
+    ax = fig.add_axes([0.05, 0.615, 0.90, 0.31]); ax.axis("off"); ax.imshow(plt.imread("/o/sch2.png"))
     c1, c2 = 1.2e-9 + 180e-12, 10e-9 + 1.8e-9
     notes = [
         ("Parts", True),
@@ -85,11 +85,11 @@ with PdfPages("/o/nucleo_225_77kHz_input.pdf") as pdf:
         ("  Today both stations come from A0. A1 needs a firmware change (second ADC, DCF77 from A1); I make it", False),
         ("  after the rod is connected. Until then A1 is simply unused.", False),
     ]
-    y = 0.575
+    y = 0.595
     for text, bold in notes:
-        fig.text(0.07, y, text, fontsize=10.2 if bold else 8.6, weight="bold" if bold else "normal",
+        fig.text(0.07, y, text, fontsize=9.6 if bold else 8.2, weight="bold" if bold else "normal",
                  color=BLUE if bold else "black")
-        y -= 0.0172
-    fig.text(0.07, 0.025, "SQ6EMM / e-CzasPL receiver experiments, 28.09.2026", fontsize=7.5, color=GREY)
+        y -= 0.0152
+    fig.text(0.07, 0.012, "SQ6EMM / e-CzasPL receiver experiments, 28.09.2026", fontsize=7.5, color=GREY)
     pdf.savefig(fig)
 print("ok")
