@@ -1,4 +1,4 @@
-# LF time & frequency receiver board — design draft (v0.2, 28 Sep 2026)
+# LF time & frequency receiver board — design draft (v0.3, 28 Sep 2026)
 
 One board that does what the NUCLEO + rods do today, plus a GPS timing receiver as the truth
 reference and an OCXO steered from e-CzasPL and/or DCF77. Draft for discussion; nothing is
@@ -154,18 +154,24 @@ Design consequences:
 4. Outputs: 1PPS output compare; NMEA/text; Ethernet later.
 The e-CzasPL and DCF77 receivers (coh.c, ecz.c, eCzas core, dcf.c, dcfbits.c) stay as they are.
 
-## 5. Open questions (for the user)
-1. ~~CTI OCXO~~: answered - OSC5A2B02, 5 V, many units (section 3.4).
-2. GPS module: NEO-M8T/LEA-M8T (recommended) or ZED-F9T? Antenna type you have?
-3. Ethernet on v1: yes / later?
-4. Board size / enclosure you have in mind; connectors (screw terminals vs JST for the rods)?
-5. Power: 12 V available where it will run?
-6. Tools: KiCad for schematic/layout? Who assembles (JLCPCB/PCBWay assembly or hand)?
-7. Rod cable length at the final site (decides whether the gain stage is populated).
+## 5. Decisions (28 Sep 2026)
+| topic | decision | consequence |
+|---|---|---|
+| OCXO | CTI OSC5A2B02, 5 V, many units | section 3.4; hand-soldered (through-hole), not by JLCPCB |
+| GPS | **u-blox LEA-M8T** (the user has one), standard active "mouse" antenna (SMA) | LEA footprint (17 x 22.4 mm, 28-pin castellated), hand-soldered; antenna bias from the module's VCC_RF (~3 V) through a ferrite + current limit; PPS = TIMEPULSE, TIMEPULSE2 to a second capture; UART + UBX (TIM-TP for qErr), V_BCKP from a supercap |
+| Ethernet | **yes** | LAN8742A (RMII) + RJ45 with integrated magnetics; 50 MHz RMII clock from the PHY's own 25 MHz crystal (keeps the OCXO clock tree clean) |
+| power | **12 V DC in** | reverse/over-voltage protection, buck 12 -> 6 V (OCXO warm-up 0.6 A + GPS + digital), then low-noise LDOs: 5.0 V OCXO, 3.3 V digital, 3.3 V analog, VREF for the ADC |
+| CAD | **KiCad** (8.x) | project in `hardware/` of this repo; ERC/DRC and fabrication outputs (Gerber, BOM, CPL) generated in a KiCad container |
+| fab | **JLCPCB, assembled** | parts chosen from the JLCPCB/LCSC library where possible (basic parts preferred); OCXO, LEA-M8T and connectors hand-soldered |
+| defaults (change if you like) | 4 layers, ~100 x 80 mm, fits a standard aluminium extrusion case; rods on 2-pin 5.08 mm screw terminals; gain stage footprints present, not populated (jumpered through) | |
 
 ## 6. Implementation plan (proposal)
-1. Answer the open questions -> freeze the block diagram (v0.2 of this document).
-2. Schematic in KiCad (I can prepare it as KiCad files block by block; review each block).
-3. Before the PCB: prove the two new blocks on the NUCLEO — GPS PPS capture (a GPS module on a
-   timer pin) and OCXO as HSE + EFC DAC on a breadboard — so the board only integrates proven parts.
-4. Layout, DRC, order (assembled), bring-up plan with test points.
+1. Prototype the two new blocks on the NUCLEO with parts the user has:
+   a. LEA-M8T: PPS -> TIM2 CH1 capture, UART -> USART (UBX TIM-TP qErr): "GPS" lines, e-CzasPL
+      frame and DCF77 second offsets against UTC (calibrates the ~18 ms / +3 ms / ~6 ms questions).
+   b. OSC5A2B02: 5 V HCMOS -> divider/buffer -> HSE (X3 is empty) ; EFC from the H7's 12-bit DAC
+      (PA4) for a first loop test (coarse, fine for proving the loop).
+2. KiCad schematic in hardware/, block by block (power, MCU+clock, AFE x2, GPS, OCXO+DAC,
+   Ethernet, USB/outputs), each reviewed by the user; LCSC part numbers checked for JLCPCB.
+3. Layout (analog corner + shield, OCXO corner, RF edge), DRC, JLCPCB assembly order.
+4. Bring-up plan with test points; firmware port (OCXO time base, GPS, steering loop).
