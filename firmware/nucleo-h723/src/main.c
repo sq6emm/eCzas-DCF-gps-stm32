@@ -1,7 +1,9 @@
 /*
  * e-CzasPL 225 kHz receiver on the NUCLEO-H723ZG (M2): direct sampling.
  *
- *   A0 (PA3) --ADC1 16 bit, 1 Msps (TIM6)--> DMA --> mixer at ~225 kHz
+ *   A0 (PA3) --ADC1 16 bit, 1 Msps (TIM6)--> DMA --> mixer at ~225 kHz (e-CzasPL)
+ *   A1 (PC0) --ADC2, same instants (dual regular simultaneous)--> mixer at 77.5 kHz (DCF77);
+ *   build with -DDCF_ON_A0 to take DCF77 from A0 as before
  *   --> sum of 100 samples = 10 kHz complex --> shifted to a 1 kHz tone
  *   --> the eCzas firmware core, unchanged (dsp.c, frame.c, timekeeper.c)
  *
@@ -16,8 +18,8 @@
  * follows +-40 Hz); an FFT search over +-450 Hz finds the carrier at start
  * and after 30 s without lock.
  *
- * Input circuit: doc/nucleo_225kHz_input.pdf (bias 10k/10k, 100 nF coupling,
- * antenna tuned to ~225 kHz).
+ * Input circuit: doc/nucleo_225_77kHz_input.pdf (two tuned rods: 225 kHz on A0,
+ * 77.5 kHz on A1, one shared decoupled 1.65 V bias node).
  * Output: ST-LINK virtual COM port (USART3), 115200 8N1; with -DAUDIO_DUMP
  * 921600 baud plus binary packets of the core's 10 kHz input.
  */
@@ -44,13 +46,17 @@
 #define DECIM        100                  /* 1 Msps -> 10 kHz */
 #define F_CARRIER    225000.0
 
-#define RING_BLK 12                         /* DMA ring: 60 ms of slack (frame decodes, the 10-min DCF77 evaluation) */
-static uint16_t adc_buf[RING_BLK * BLOCK] __attribute__((aligned(32)));
+/* DMA ring of 32-bit words: ADC1 (A0) in bits 15:0, ADC2 (A1) in bits 31:16 (dual mode, DAMDF = 10).
+   6 blocks = 30 ms of slack (the 10-min DCF77 evaluation takes ~16 ms); 120 KB as the old 16-bit ring */
+#define RING_BLK 6
+static uint32_t adc_buf[RING_BLK * BLOCK] __attribute__((aligned(32)));
 static volatile uint32_t dma_wraps;
 static volatile uint32_t overruns, dma_halves;
+static float adc_mean1, adc_mean2;          /* ADC1 (A0) and ADC2 (A1) means, for STATUS */
+static uint32_t adc_min1 = 65535, adc_max1, adc_min2 = 65535, adc_max2;   /* per STATUS period */
 static uint32_t max_lag, pl_bad, max_blk_cyc; static uint64_t busy_cyc;
 
-ADC_HandleTypeDef hadc1;
+ADC_HandleTypeDef hadc1, hadc2;
 DMA_HandleTypeDef hdma_adc1;
 TIM_HandleTypeDef htim6;
 UART_HandleTypeDef huart3;
@@ -193,8 +199,8 @@ static void adc_init(void)
     hdma_adc1.Init.Request = DMA_REQUEST_ADC1;
     hdma_adc1.Init.Direction = DMA_PERIPH_TO_MEMORY;
     hdma_adc1.Init.PeriphInc = DMA_PINC_DISABLE; hdma_adc1.Init.MemInc = DMA_MINC_ENABLE;
-    hdma_adc1.Init.PeriphDataAlignment = DMA_PDATAALIGN_HALFWORD;
-    hdma_adc1.Init.MemDataAlignment = DMA_MDATAALIGN_HALFWORD;
+    hdma_adc1.Init.PeriphDataAlignment = DMA_PDATAALIGN_WORD;     /* ADC12 common data register: both ADCs */
+    hdma_adc1.Init.MemDataAlignment = DMA_MDATAALIGN_WORD;
     hdma_adc1.Init.Mode = DMA_CIRCULAR; hdma_adc1.Init.Priority = DMA_PRIORITY_HIGH;
     hdma_adc1.Init.FIFOMode = DMA_FIFOMODE_DISABLE;
     HAL_DMA_Init(&hdma_adc1);
@@ -223,6 +229,17 @@ static void adc_init(void)
     ch.SamplingTime = ADC_SAMPLETIME_8CYCLES_5;
     ch.SingleDiff = ADC_SINGLE_ENDED; ch.OffsetNumber = ADC_OFFSET_NONE;
     HAL_ADC_ConfigChannel(&hadc1, &ch);
+    /* ADC2 (slave): A1 = PC0 = INP10, converted at the same trigger as ADC1 */
+    hadc2 = hadc1; hadc2.Instance = ADC2; hadc2.DMA_Handle = NULL;
+    HAL_ADC_Init(&hadc2);
+    HAL_ADCEx_Calibration_Start(&hadc2, ADC_CALIB_OFFSET_LINEARITY, ADC_SINGLE_ENDED);
+    ch.Channel = ADC_CHANNEL_10;
+    HAL_ADC_ConfigChannel(&hadc2, &ch);
+    ADC_MultiModeTypeDef mm = {0};
+    mm.Mode = ADC_DUALMODE_REGSIMULT;
+    mm.DualModeData = ADC_DUALMODEDATAFORMAT_32_10_BITS;      /* CDR = ADC2 << 16 | ADC1 */
+    mm.TwoSamplingDelay = ADC_TWOSAMPLINGDELAY_1CYCLE;
+    HAL_ADCEx_MultiModeConfigChannel(&hadc1, &mm);
     htim6.Instance = TIM6;
     htim6.Init.Prescaler = 0; htim6.Init.Period = 199;
     htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
@@ -231,7 +248,7 @@ static void adc_init(void)
     TIM_MasterConfigTypeDef m = {0};
     m.MasterOutputTrigger = TIM_TRGO_UPDATE; m.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
     HAL_TIMEx_MasterConfigSynchronization(&htim6, &m);
-    HAL_ADC_Start_DMA(&hadc1, (uint32_t *)adc_buf, RING_BLK * BLOCK);
+    HAL_ADCEx_MultiModeStart_DMA(&hadc1, adc_buf, RING_BLK * BLOCK);
     HAL_TIM_Base_Start(&htim6);
 }
 void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef *h) { (void)h; dma_halves++; }
@@ -417,13 +434,18 @@ static void station_samples(float er, float ei, float dr, float di)
    (500 x clock ratio input samples; the fractional sample is split) */
 static double dec_pos;
 static float acc_r, acc_i;
-static void process_block(const uint16_t *b, float mean)
+static void process_block(const uint32_t *b, float mean, float mean2)
 {
     double step = 500.0 * cur_tps_ratio;  /* input samples per true 500 us */
     for (int n = 0; n < BLOCK; n++) {
-        float x = (float)b[n] - mean;
+        float x = (float)(b[n] & 0xFFFF) - mean;
+#ifdef DCF_ON_A0
+        float x2 = x; (void)mean2;
+#else
+        float x2 = (float)(b[n] >> 16) - mean2;
+#endif
         float xr = x * mix_c, xi = x * mix_s;
-        float x2r = x * mx2_c, x2i = x * mx2_s;
+        float x2r = x2 * mx2_c, x2i = x2 * mx2_s;
         float t2 = mx2_c * rt2_c - mx2_s * rt2_s;
         mx2_s = mx2_c * rt2_s + mx2_s * rt2_c; mx2_c = t2;
         float t = mix_c * rot_c - mix_s * rot_s;
@@ -559,7 +581,7 @@ int main(void)
     } else snprintf(m, sizeof m, "LSE crystal NOT running - no drift correction\r\n");
     uart_puts(m);
 
-    float mean = 32768.0f;
+    float mean = 32768.0f, mean2 = 32768.0f;
     uint64_t next_s = 2000, next_status = 20000, next_carrier = 120000;
     for (;;) {
         static uint64_t rd;               /* next sample to process */
@@ -570,7 +592,7 @@ int main(void)
             rd = (wr / BLOCK - 1) * BLOCK;
         }
         uint32_t c0 = DWT->CYCCNT;
-        const uint16_t *b = adc_buf + (rd / BLOCK % RING_BLK) * BLOCK;
+        const uint32_t *b = adc_buf + (rd / BLOCK % RING_BLK) * BLOCK;
         {
             uint32_t a0 = (uint32_t)b & ~31u, a1 = ((uint32_t)(b + BLOCK) + 31) & ~31u;
             SCB_InvalidateDCache_by_Addr((uint32_t *)a0, a1 - a0);
@@ -578,9 +600,18 @@ int main(void)
         rd += BLOCK;
         uint32_t lag = (uint32_t)(wr - rd);
         if (lag > max_lag) max_lag = lag;
-        double s = 0;
-        for (int i = 0; i < BLOCK; i += 50) s += b[i];
+        double s = 0, s2 = 0;
+        for (int i = 0; i < BLOCK; i += 50) { s += b[i] & 0xFFFF; s2 += b[i] >> 16; }
+        for (int i = 0; i < BLOCK; i += 7) {
+            uint32_t v1 = b[i] & 0xFFFF, v2 = b[i] >> 16;
+            if (v1 < adc_min1) adc_min1 = v1;
+            if (v1 > adc_max1) adc_max1 = v1;
+            if (v2 < adc_min2) adc_min2 = v2;
+            if (v2 > adc_max2) adc_max2 = v2;
+        }
         mean += 0.01f * ((float)(s / (BLOCK / 50)) - mean);
+        mean2 += 0.01f * ((float)(s2 / (BLOCK / 50)) - mean2);
+        adc_mean1 = mean; adc_mean2 = mean2;
         if (pl_ok) {                      /* phase-locked mixer for samples rd-BLOCK .. rd */
             double t1 = true_time(200 * (int64_t)rd + pl_c);
             double dt = (t1 - pl_t) * (8.0 / 32768.0);        /* true seconds in this block */
@@ -608,7 +639,7 @@ int main(void)
             F_true = F_CARRIER;                /* fixed; the carrier trackers follow the rest */
             pl_ok = 1;
         }
-        process_block(b, mean);
+        process_block(b, mean, mean2);
         if (ez.cand_ready) handle_candidate();
         { uint32_t dc = DWT->CYCCNT - c0; busy_cyc += dc; if (dc > max_blk_cyc) max_blk_cyc = dc; }
 
@@ -662,16 +693,18 @@ int main(void)
             uint32_t sec;
             char d1[40] = "no time yet", b4[16];
             if (tk_time(&tk, now_tick(), &sec, 0)) date_str(d1, sec, 0);
-            snprintf(m, sizeof m, "%s | eCzas carrier %s %s Hz noise %s deg lvl0 %s | heard %lu, decoded %lu, confirmed %lu, rejected %lu | DCF77 carrier %s %s mHz | clock %+ld ppm (LSE) | cpu %lu%%, longest block %lu ms, max lag %lu ms%s",
+            snprintf(m, sizeof m, "%s | eCzas carrier %s %s Hz noise %s deg lvl0 %s | heard %lu, decoded %lu, confirmed %lu, rejected %lu | DCF77 carrier %s %s mHz | clock %+ld ppm (LSE) | cpu %lu%%, longest block %lu ms, max lag %lu ms | adc A0 mean %ld min %lu max %lu, A1 mean %ld min %lu max %lu%s",
                      d1, PS[trk_e.state], f1(b1, trk_e.hz, 1), f1(b2, trk_e.err_avg * 360, 0), f1(b3, trk_e.lvl0 * 360, 0),
                      (unsigned long)n_heard, (unsigned long)n_decoded, (unsigned long)n_conf, (unsigned long)n_rej,
                      dcf_state_txt(), f1(b4, trk_d.hz * 1000, 1), (long)lround((cur_tps_ratio - 1) * 1e6),
                      (unsigned long)(busy_cyc / (SystemCoreClock / 10)), (unsigned long)(max_blk_cyc / (SystemCoreClock / 1000)),
-                     (unsigned long)(max_lag / 1000),
+                     (unsigned long)(max_lag / 1000), lroundf(adc_mean1), (unsigned long)adc_min1, (unsigned long)adc_max1,
+                     lroundf(adc_mean2), (unsigned long)adc_min2, (unsigned long)adc_max2,
                      overruns ? " OVERRUN" : "");
             if (pl_bad) { strcat(m, " PLBAD"); pl_bad = 0; }
             put_line("STATUS", m);
             overruns = 0; busy_cyc = 0; max_lag = 0; max_blk_cyc = 0;
+            adc_min1 = adc_min2 = 65535; adc_max1 = adc_max2 = 0;
         }
     }
 }

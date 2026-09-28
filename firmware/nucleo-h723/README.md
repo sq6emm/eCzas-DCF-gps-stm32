@@ -41,7 +41,11 @@ frame.c, timekeeper.c, from the `eczas` submodule). No radio chip, only an anten
 ## Hardware
 
 - NUCLEO-H723ZG, powered and flashed through its ST-LINK V3 (USB).
-- Input on **A0 (PA3)**: see [`doc/nucleo_225kHz_input.pdf`](../../doc/nucleo_225kHz_input.pdf).
+- Inputs since 28 Sep 2026: **A0 (PA3)** = e-CzasPL rod, **A1 (PC0)** = DCF77 rod, sampled at the same
+  instants (ADC1 + ADC2 dual regular simultaneous, one 32-bit DMA word per sample pair; build with
+  `-DDCF_ON_A0` to take DCF77 from A0 as before). STATUS shows both ADC means (1.65 V = ~32768).
+  First result: DCF77 C/N0 +15 dB-Hz on its own rod vs -11..-31 through the 225 kHz rod.
+- Old single-input circuit: [`doc/nucleo_225kHz_input.pdf`](../../doc/nucleo_225kHz_input.pdf).
   Planned: two tuned rods (225 kHz on A0, 77.5 kHz on A1) on one shared, decoupled 1.65 V bias
   node, no coupling capacitors: [`doc/nucleo_225_77kHz_input.pdf`](../../doc/nucleo_225_77kHz_input.pdf)
   (the old 10k/10k divider through 100 nF loads the tuned rod to Q about 8).
