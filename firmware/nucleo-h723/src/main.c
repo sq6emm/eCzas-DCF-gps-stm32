@@ -285,7 +285,10 @@ TIM_HandleTypeDef htim16;
 #define LSE_WIN 4000                     /* captures per measurement: 1 s */
 #endif
 #ifndef EFC_INIT
-#define EFC_INIT 2310                    /* DAC code at start: this OCXO (28 Sep: 162 ppb slow at 2048) */
+#define EFC_INIT 2253                    /* DAC code at start: this OCXO locked at ~2253 (28 Sep) */
+#endif
+#ifndef EFC_SLOPE
+#define EFC_SLOPE 0.816e-9               /* measured 28 Sep (ppb per code); 0 = calibrate at start */
 #endif
 #else
 #define REF_TIM      TIM16
@@ -316,7 +319,7 @@ static void ocxo_init(void)
     __HAL_RCC_DAC12_CLK_ENABLE();
     DAC1->CR |= DAC_CR_EN2;
     efc_set(EFC_INIT);
-    efc_init(&efc, EFC_INIT);
+    efc_init(&efc, EFC_INIT, EFC_SLOPE);
     /* PA0 = TIM2_ETR (AF1) */
     __HAL_RCC_GPIOA_CLK_ENABLE(); __HAL_RCC_TIM2_CLK_ENABLE(); __HAL_RCC_TIM3_CLK_ENABLE();
     GPIO_InitTypeDef g = {0};
@@ -801,15 +804,16 @@ int main(void)
                      (re.state == COH_TRACK && dcf_verified()) ? f1(b6, ppb, 1) : "-");
             put_line("CARRIER", m);
 #ifdef OCXO_REF
-            {   /* steer the OCXO: DCF77 (PTB) first, e-CzasPL when DCF77 is not verified */
-                int src = EFC_SRC_NONE; double y = 0;
-                if (rd2.state == COH_TRACK && dcf_verified()) { src = EFC_SRC_DCF77; y = rd2.freq_hz / F_DCF; }
-                else if (re.state == COH_TRACK && re.err_deg < 25) { src = EFC_SRC_ECZAS; y = re.freq_hz / F_CARRIER; }
-                efc_minute(&efc, src, y, 60.0);
-                static const char *SRC[] = { "none", "DCF77", "e-CzasPL" };
-                snprintf(m, sizeof m, "EFC %s = %s V, %s, source %s, offset %s ppb, time error %s ns, slope %s ppb/code",
-                         f1(b1, efc.c, 0), f3(b7, efc.c * 3.3 / 4096), efc_state_txt(&efc), SRC[src],
-                         src ? f1(b2, y * 1e9, 1) : "-", f1(b3, efc.x * 1e9, 1), f3(b8, efc.slope * 1e9));
+            {   /* steer the OCXO from both carriers (common/efc.c): DCF77 = accuracy, e-CzasPL with
+                   its learned offset removed, weighted by the measured noise */
+                int vd = rd2.state == COH_TRACK && dcf_verified(), ve = re.state == COH_TRACK && re.err_deg < 25;
+                int src = efc_minute2(&efc, vd, rd2.freq_hz / F_DCF, ve, re.freq_hz / F_CARRIER, 60.0);
+                static const char *SRC[] = { "none", "DCF77", "e-CzasPL", "DCF77+e-CzasPL" };
+                char b9[16], b10[16];
+                snprintf(m, sizeof m, "EFC %s = %s V, %s, source %s (e-CzasPL weight %s), offset %s ppb, time error %s ns, slope %s ppb/code | e-CzasPL-DCF77 %s ppb (%d min)",
+                         f1(b1, efc.c, 0), f3(b7, efc.c * 3.3 / 4096), efc_state_txt(&efc), SRC[src], f3(b9, efc.we),
+                         src ? f1(b2, efc.y * 1e9, 1) : "-", f1(b3, efc.x * 1e9, 1), f3(b8, efc.slope * 1e9),
+                         efc.bn ? f3(b10, (efc.bn < 10 ? efc.bsum / efc.bn : efc.bias) * 1e9) : "-", efc.bn);
                 put_line("OCXO", m);
             }
 #endif

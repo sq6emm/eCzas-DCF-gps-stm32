@@ -17,16 +17,58 @@
 #ifndef EFC_OUTLIER
 #define EFC_OUTLIER  50e-9
 #endif
+#ifndef EFC_BIAS_TAU
+#define EFC_BIAS_TAU 10800.0       /* e-CzasPL - DCF77 offset: 3 h average */
+#endif
+#ifndef EFC_BIAS_INIT
+#define EFC_BIAS_INIT 10           /* minutes with both stations before e-CzasPL is used */
+#endif
+#ifndef EFC_DISAGREE
+#define EFC_DISAGREE 10e-9
+#endif
+#define EFC_NOISE_N  60.0          /* noise estimates: 1 h average */
 #define EFC_MAX 4095.0
 
 static double clampc(double c) { return c < 0 ? 0 : c > EFC_MAX ? EFC_MAX : c; }
 
-void efc_init(efc_t *f, double code)
+void efc_init(efc_t *f, double code, double slope)
 {
     f->state = EFC_WAIT; f->src = EFC_SRC_NONE; f->n = f->skip = f->outliers = 0;
     f->c = f->target = f->c0 = f->cref = clampc(code); f->e = 0;
     f->slope = EFC_SLOPE_NOM;
     f->y0 = f->y1 = f->ysum = f->yprev = f->x = f->integ = f->y = 0;
+    f->bias = f->bsum = 0; f->bn = 0;
+    f->vd = f->ve = 2e-18; f->pyd = f->pye = 0; f->hd = f->he = 0; f->we = 0;
+    if (slope != 0) { f->slope = slope; f->state = EFC_LOCK; f->skip = 0; }
+}
+
+int efc_minute2(efc_t *f, int vd, double yd, int ve, double ye, double T)
+{
+    /* minute-to-minute noise of each station (Allan-like: half the squared first difference) */
+    if (vd) { if (f->hd) { double d = yd - f->pyd; f->vd += (0.5 * d * d - f->vd) / EFC_NOISE_N; } f->pyd = yd; }
+    if (ve) { if (f->he) { double d = ye - f->pye; f->ve += (0.5 * d * d - f->ve) / EFC_NOISE_N; } f->pye = ye; }
+    f->hd = vd; f->he = ve;
+    int src = EFC_SRC_NONE; double y = 0;
+    f->we = 0;
+    if (vd && ve) {
+        double r = ye - yd;
+        if (f->bn < EFC_BIAS_INIT) {                  /* learning the offset first: DCF77 alone */
+            f->bsum += r;
+            if (++f->bn == EFC_BIAS_INIT) f->bias = f->bsum / EFC_BIAS_INIT;
+            src = EFC_SRC_DCF77; y = yd;
+        } else if (fabs(r - f->bias) > EFC_DISAGREE) {
+            src = EFC_SRC_DCF77; y = yd;              /* one of them is wrong this minute */
+        } else {
+            f->bias += (r - f->bias) * T / EFC_BIAS_TAU;
+            double wd = 1 / f->vd, we = 1 / f->ve;
+            f->we = we / (wd + we);
+            y = f->we * (ye - f->bias) + (1 - f->we) * yd;
+            src = EFC_SRC_BOTH;
+        }
+    } else if (vd) { src = EFC_SRC_DCF77; y = yd; }
+    else if (ve) { src = EFC_SRC_ECZAS; y = f->bn >= EFC_BIAS_INIT ? ye - f->bias : ye; f->we = 1; }
+    efc_minute(f, src, y, T);
+    return src;
 }
 
 static void to_wait(efc_t *f) { f->state = EFC_WAIT; f->n = 0; f->src = EFC_SRC_NONE; }
