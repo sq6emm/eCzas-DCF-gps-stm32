@@ -42,6 +42,9 @@ frame.c, timekeeper.c, from the `eczas` submodule). No radio chip, only an anten
 
 - NUCLEO-H723ZG, powered and flashed through its ST-LINK V3 (USB).
 - Input on **A0 (PA3)**: see [`doc/nucleo_225kHz_input.pdf`](../../doc/nucleo_225kHz_input.pdf).
+  Planned: two tuned rods (225 kHz on A0, 77.5 kHz on A1) on one shared, decoupled 1.65 V bias
+  node, no coupling capacitors: [`doc/nucleo_225_77kHz_input.pdf`](../../doc/nucleo_225_77kHz_input.pdf)
+  (the old 10k/10k divider through 100 nF loads the tuned rod to Q about 8).
   Bias to 1.65 V with 10k/10k from 3V3, 100 nF coupling, antenna tuned to ~225 kHz.
   Tested: ferrite rod (12 cm, 360 µH) with 1.5 nF across it (resonance about 217 kHz),
   20 cm twisted pair to the board. An untuned antenna mostly brings in aliased
