@@ -56,6 +56,7 @@ typedef struct {
     float    pm_sigma;
     int      have_mark, have_minute;
     double   slip;                      /* drift of the DCF77 second through the LSE time scale, samples (fraction kept) */
+    int      pm_block_done;             /* the phase code has been evaluated by a 10-min block */
     int      pm_ref;                    /* phase-code fold anchor (sample in the LSE second): set from the mark once,
                                            then moved only by the drift correction, never by mark noise; -1 = unset */
 } dcf_t;
@@ -73,5 +74,9 @@ void dcf_block(dcf_t *d, float carrier_hz);
  * accept above min_sigma. Lets DCF77 be verified within a minute or two instead of at the first
  * 10-min block. Returns 1 when marks were found (d->mark, mark_sigma, have_mark set). */
 int  dcf_quick_mark(dcf_t *d, float min_sigma);
+/* The same for the minute marker (after the marks, until found) and the phase code (after the
+ * minute, until the first 10-min block): evaluate the running sums without decaying them. */
+int  dcf_quick_minute(dcf_t *d, float min_sigma);
+int  dcf_quick_pm(dcf_t *d);
 
 #endif

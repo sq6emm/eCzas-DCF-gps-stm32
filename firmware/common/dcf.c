@@ -169,9 +169,73 @@ int dcf_block_ready(const dcf_t *d)
     return d->n > 0 && d->n % ((uint64_t)DCF_SPS * DCF_BLOCK_S) == 0;
 }
 
+/* minute marker from the running per-second dip depths (no decay here) */
+static void minute_eval(dcf_t *d, float min_sigma)
+{
+    float med, sg;
+    /* minute: the second-of-minute without a reduction (DCF77 second 59) */
+    {
+        float v[60]; int c, lo = 0, ok = 1;
+        for (c = 0; c < 60; c++) { if (d->dipn[c] < 3) ok = 0; v[c] = d->dipn[c] > 0 ? d->dip[c] / d->dipn[c] : 0; }
+        if (ok) {
+            for (c = 1; c < 60; c++) if (v[c] < v[lo]) lo = c;
+            sg = robust_sigma(v, 60, lo, lo, &med);
+            d->minute_sigma = (med - v[lo]) / sg;
+            if (d->minute_sigma > min_sigma) {
+                if (d->have_minute && d->minute_s != lo) { memset(d->pmf, 0, sizeof d->pmf); d->pmn = 0; }
+                if (d->pm_ref < 0) d->pm_ref = d->mark;
+                d->minute_s = lo; d->have_minute = 1;
+            }
+        }
+    }
+
+}
+
+/* phase code from the running fold (no decay here) */
+static void pm_eval(dcf_t *d)
+{
+    float med, sg; int k;
+    /* phase code: correlate the running fold with the exact sequence over +-DCF_LAGW */
+    if (d->pmn > 20) {
+        static float cc[2 * DCF_LAGW + 1];
+        int L, kb = 0;
+        for (L = -DCF_LAGW; L <= DCF_LAGW; L++) {
+            float s = 0;
+            for (k = 0; k < DCF_SPS; k++) s += d->pmf[DCF_LAGW + k + L] * W[k];
+            cc[L + DCF_LAGW] = s;
+            if (fabsf(s) > fabsf(cc[kb])) kb = L + DCF_LAGW;
+        }
+        sg = robust_sigma(cc, 2 * DCF_LAGW + 1, kb - 4 < 0 ? 0 : kb - 4, kb + 4 > 2 * DCF_LAGW ? 2 * DCF_LAGW : kb + 4, &med);
+        d->pm_sigma = (fabsf(cc[kb]) - fabsf(med)) / sg;
+        {
+            float fr = 0;
+            if (kb > 0 && kb < 2 * DCF_LAGW) {
+                float y1 = fabsf(cc[kb - 1]), y2 = fabsf(cc[kb]), y3 = fabsf(cc[kb + 1]), den = y1 - 2 * y2 + y3;
+                if (den != 0) fr = 0.5f * (y1 - y3) / den;
+            }
+            int off = ((d->pm_ref - d->mark + DCF_SPS + DCF_SPS / 2) % DCF_SPS) - DCF_SPS / 2;   /* anchor - mark, samples */
+            d->pm_lag_ms = (kb - DCF_LAGW + fr + off) * 1000.0f / DCF_SPS;
+        }
+    }
+}
+
+int dcf_quick_minute(dcf_t *d, float min_sigma)
+{
+    if (!d->have_mark || d->have_minute) return 0;
+    minute_eval(d, min_sigma);
+    return d->have_minute;
+}
+
+int dcf_quick_pm(dcf_t *d)
+{
+    if (!d->have_minute || d->pm_block_done || d->pmn <= 20) return 0;
+    pm_eval(d);
+    return d->pm_sigma > DCF_PM_MIN;
+}
+
 void dcf_block(dcf_t *d, float carrier_hz)
 {
-    float med, sg; int k, best;
+    int k, best;
     /* second mark (running) */
     /* the DCF77 second lasts (1 - carrier_hz/77500) * 2000 LSE samples: over one block its start
      * moves by -carrier_hz/77500 * block samples through the LSE second; shift the running
@@ -202,44 +266,14 @@ void dcf_block(dcf_t *d, float carrier_hz)
     }
     memset(d->yf, 0, sizeof d->yf); d->nsec = 0;
 
-    /* minute: the second-of-minute without a reduction (DCF77 second 59) */
+    minute_eval(d, DCF_MIN_MIN);
     {
-        float v[60]; int c, lo = 0, ok = 1;
-        for (c = 0; c < 60; c++) { if (d->dipn[c] < 3) ok = 0; v[c] = d->dipn[c] > 0 ? d->dip[c] / d->dipn[c] : 0; }
-        if (ok) {
-            for (c = 1; c < 60; c++) if (v[c] < v[lo]) lo = c;
-            sg = robust_sigma(v, 60, lo, lo, &med);
-            d->minute_sigma = (med - v[lo]) / sg;
-            if (d->minute_sigma > DCF_MIN_MIN) {
-                if (d->have_minute && d->minute_s != lo) { memset(d->pmf, 0, sizeof d->pmf); d->pmn = 0; }
-                if (d->pm_ref < 0) d->pm_ref = d->mark;
-                d->minute_s = lo; d->have_minute = 1;
-            }
-        }
+        int c;
         for (c = 0; c < 60; c++) { d->dip[c] *= DCF_KEEP; d->dipn[c] *= DCF_KEEP; }
     }
-
-    /* phase code: correlate the running fold with the exact sequence over +-DCF_LAGW */
     if (d->pmn > 20) {
-        static float cc[2 * DCF_LAGW + 1];
-        int L, kb = 0;
-        for (L = -DCF_LAGW; L <= DCF_LAGW; L++) {
-            float s = 0;
-            for (k = 0; k < DCF_SPS; k++) s += d->pmf[DCF_LAGW + k + L] * W[k];
-            cc[L + DCF_LAGW] = s;
-            if (fabsf(s) > fabsf(cc[kb])) kb = L + DCF_LAGW;
-        }
-        sg = robust_sigma(cc, 2 * DCF_LAGW + 1, kb - 4 < 0 ? 0 : kb - 4, kb + 4 > 2 * DCF_LAGW ? 2 * DCF_LAGW : kb + 4, &med);
-        d->pm_sigma = (fabsf(cc[kb]) - fabsf(med)) / sg;
-        {
-            float fr = 0;
-            if (kb > 0 && kb < 2 * DCF_LAGW) {
-                float y1 = fabsf(cc[kb - 1]), y2 = fabsf(cc[kb]), y3 = fabsf(cc[kb + 1]), den = y1 - 2 * y2 + y3;
-                if (den != 0) fr = 0.5f * (y1 - y3) / den;
-            }
-            int off = ((d->pm_ref - d->mark + DCF_SPS + DCF_SPS / 2) % DCF_SPS) - DCF_SPS / 2;   /* anchor - mark, samples */
-            d->pm_lag_ms = (kb - DCF_LAGW + fr + off) * 1000.0f / DCF_SPS;
-        }
+        pm_eval(d);
+        d->pm_block_done = 1;
         for (k = 0; k < WIN; k++) d->pmf[k] *= DCF_KEEP;
         d->pmn *= DCF_KEEP;
     }

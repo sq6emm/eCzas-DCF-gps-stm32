@@ -39,6 +39,10 @@ int main(int argc, char **argv)
         n++;
         if (quick && !dcf.have_mark && trk.state == COH_TRACK && (n - n0) % 20000 == 0 && dcf_quick_mark(&dcf, 10.0f))
             printf("# quick mark at %.0f s: %.1f ms, %.1f sigma\n", (n - n0) / 2000.0, dcf.mark / 2.0, dcf.mark_sigma);
+        if (quick > 1 && (n - n0) % 20000 == 0) {
+            if (dcf_quick_minute(&dcf, getenv("DCF_QMIN") ? (float)atof(getenv("DCF_QMIN")) : 8.0f)) printf("# quick minute at %.0f s: %d, %.1f sigma\n", (n - n0) / 2000.0, dcf.minute_s, dcf.minute_sigma);
+            static int pm_said; if (dcf_quick_pm(&dcf) && !pm_said) { pm_said = 1; printf("# quick phase code at %.0f s: %+.3f ms, %.1f sigma\n", (n - n0) / 2000.0, dcf.pm_lag_ms, dcf.pm_sigma); }
+        }
         if (blind && (n - n0) == 360000 && !dcf.have_mark) { printf("# blind pull-in: no marks after 180 s, search\n"); coh_search(&trk); }
         if (dcf_block_ready(&dcf)) {
             coh_report_t r; coh_report(&trk, &r);

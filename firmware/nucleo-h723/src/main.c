@@ -536,6 +536,21 @@ static void station_samples(float er, float ei, float dr, float di)
         snprintf(m, sizeof m, "second marks found early: %s ms of the second, %s sigma", f1(b1, dcf.mark / 2.0, 0), f1(b2, dcf.mark_sigma, 0));
         put_line("DCF77", m);
     }
+    /* the same for the minute marker (8 sigma) and the phase code, until the first 10-min block:
+       bench: first confirmed DCF77 minute after 12-15 min instead of 24-26 (15-17 dB-Hz) */
+    if (trk_d.state == COH_TRACK && n2k % 20000 == 0) {
+        char m[100], b1[16], b2[16];
+        if (dcf_quick_minute(&dcf, 8.0f)) {
+            snprintf(m, sizeof m, "minute found early: %s sigma", f1(b1, dcf.minute_sigma, 0));
+            put_line("DCF77", m);
+        }
+        static int pm_said;
+        if (dcf_quick_pm(&dcf) && !pm_said) {
+            pm_said = 1;
+            snprintf(m, sizeof m, "phase code found early: %s ms, %s sigma", f1(b1, dcf.pm_lag_ms, 1), f1(b2, dcf.pm_sigma, 0));
+            put_line("DCF77", m);
+        }
+    }
 #ifdef OCXO_REF
     /* the blind pull-in at 0 Hz (see main) found nothing within 3 min: search the normal way */
     if (n2k == 360000 && !dcf.have_mark && trk_d.state != COH_SEARCH) { coh_search(&trk_d); put_line("DCF77", "no second marks 3 min after the blind pull-in - searching"); }
