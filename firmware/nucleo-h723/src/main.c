@@ -353,7 +353,7 @@ static double true_time(int64_t tick)      /* capture units, from the ring */
 static coh_trk_t trk_e, trk_d;
 static ecz_t ez;
 static dcf_t dcf;
-static int dcf_blocks_locked; static float dcf_line_hz = 1e9f;
+static int dcf_blocks_locked, dcf_line_proven; static float dcf_line_hz = 1e9f;
 /* DCF77 counts as locked only when the tracked line also carries confirmed second marks
    (a local spur can be tracked, but it has no 1-s amplitude pattern) */
 static int dcf_verified(void)
@@ -392,15 +392,17 @@ static void station_samples(float er, float ei, float dr, float di)
     n2k++;
     if (dcf_block_ready(&dcf)) {
         dcf_block(&dcf, trk_d.state == COH_TRACK ? (float)trk_d.hz : 0.0f);
-        /* carrier check: a DCF77 carrier has second marks; none 60 min after locking
-         * onto a line -> it is something else (a local spur): reject it, search again.
-         * The count goes on through re-searches that find the same line again (+-0.15 Hz:
-         * a spur moves with the LSE and is often lost and found again) */
+        /* carrier check: a DCF77 carrier has second marks; none in the first 60 min on a
+         * line -> it is something else (a local spur): reject it, search again. The count
+         * goes on through re-searches that find the same line again (+-0.15 Hz: a spur moves
+         * with the LSE and is often lost and found again). A line that has shown marks is
+         * DCF77 and is never rejected (its marks may fade for a while) */
         if (trk_d.state != COH_SEARCH) {
-            if (fabsf((float)trk_d.hz - dcf_line_hz) > 0.15f) { dcf_line_hz = (float)trk_d.hz; dcf_blocks_locked = 1; }
+            if (fabsf((float)trk_d.hz - dcf_line_hz) > 0.15f) { dcf_line_hz = (float)trk_d.hz; dcf_blocks_locked = 1; dcf_line_proven = 0; }
             else dcf_blocks_locked++;
+            if (dcf.mark_sigma >= 6) dcf_line_proven = 1;
         }
-        if (dcf_blocks_locked >= 6 && dcf.mark_sigma < 6) {
+        if (!dcf_line_proven && dcf_blocks_locked >= 6 && dcf.mark_sigma < 6) {
             char m[80], b1[16];
             snprintf(m, sizeof m, "carrier at %s Hz has no second marks - rejected, searching", f1(b1, trk_d.hz, 1));
             put_line("DCF77", m);

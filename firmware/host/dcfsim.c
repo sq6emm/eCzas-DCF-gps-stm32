@@ -35,11 +35,14 @@ int main(int argc, char **argv)
             dcf_block(&dcf, trk.state == COH_TRACK ? (float)trk.hz : 0.0f);
             /* carrier check: a DCF77 carrier has second marks. No mark 60 min after locking
              * -> this line is something else (a local spur): reject it and search again. */
-            static int blocks_locked = 0; static float line_hz = 1e9;
+            static int blocks_locked = 0, proven = 0; static float line_hz = 1e9;
             if (trk.state == COH_SEARCH) ;                                  /* keep counting through re-searches */
-            else if (fabsf((float)trk.hz - line_hz) > 0.15f) { line_hz = (float)trk.hz; blocks_locked = 1; }
-            else blocks_locked++;
-            if (blocks_locked >= 6 && dcf.mark_sigma < 6) {
+            else {
+                if (fabsf((float)trk.hz - line_hz) > 0.15f) { line_hz = (float)trk.hz; blocks_locked = 1; proven = 0; }
+                else blocks_locked++;
+                if (dcf.mark_sigma >= 6) proven = 1;                        /* marks seen: DCF77, keep it */
+            }
+            if (!proven && blocks_locked >= 6 && dcf.mark_sigma < 6) {
                 printf("# reject %.3f Hz (no second marks after %d blocks)\n", trk.hz, blocks_locked);
                 coh_reject(&trk, 0.05f); blocks_locked = 0; memset(dcf.yr, 0, sizeof dcf.yr);
             }
