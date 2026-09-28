@@ -62,7 +62,8 @@ def make(cn0, seed):
         e = a.ppm * 1e-6
         k = np.arange(N) * (1 + e)                                # LSE sample k is at true time k(1+e)/2000
         y = (np.interp(k, np.arange(N), z.real) + 1j * np.interp(k, np.arange(N), z.imag))
-        y = y * np.exp(-2j * np.pi * 77500 * e * np.arange(N) / 2000)   # mixer at nominal 77.5 kHz of LSE time
+        # mixer at nominal 77.5 kHz of LSE time: a fast crystal (e < 0) puts DCF77 below 0 Hz (NUCLEO: -0.14 Hz)
+        y = y * np.exp(2j * np.pi * 77500 * e * np.arange(N) / 2000)
     if cn0 is not None:
         rng = np.random.default_rng(seed)
         s2 = C * 2000 / 10 ** (cn0 / 10)                          # complex noise variance at 2 kHz
