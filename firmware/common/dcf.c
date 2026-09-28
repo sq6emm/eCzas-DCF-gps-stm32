@@ -10,10 +10,11 @@
 static float W[DCF_SPS];                    /* phase-code template (mean 0, unit energy) */
 static float T[DCF_SPS];                    /* second-mark template (mean 0) */
 static float qring[QRING];
+uint8_t dcf_prn_bits[512];                  /* the PTB sequence (also used by dcfbits.c) */
 
 static void build(void)
 {
-    int sr = 0, b1 = 1, k, t, n = 0; uint8_t prn[512]; float m = 0, e = 0;
+    int sr = 0, b1 = 1, k, t, n = 0; uint8_t *prn = dcf_prn_bits; float m = 0, e = 0;
     for (k = 0; k < 512; k++) {             /* 9-stage register from 0, a 1 shifted in first */
         sr = ((sr << 1) | b1) & 0x1FF;
         b1 = ((sr >> 4) & 1) ^ ((sr >> 8) & 1);

@@ -31,6 +31,7 @@
 #include "coh.h"
 #include "ecz.h"
 #include "dcf.h"
+#include "dcfbits.h"
 #include "frame.h"
 #include "timekeeper.h"
 
@@ -370,6 +371,7 @@ static double true_time(int64_t tick)      /* capture units, from the ring */
 static coh_trk_t trk_e, trk_d;
 static ecz_t ez;
 static dcf_t dcf;
+static dcfbits_t dcfb;                     /* DCF77 time code, every minute */
 static int dcf_blocks_locked, dcf_line_proven; static float dcf_line_hz = 1e9f;
 /* DCF77 counts as locked only when the tracked line also carries confirmed second marks
    (a local spur can be tracked, but it has no 1-s amplitude pattern) */
@@ -396,6 +398,32 @@ static void dump(uint8_t type, float zr, float zi)
     if (++pn[w] == 200) { uart_write(&pk[w], sizeof pk[w]); pn[w] = 0; }
 }
 #endif
+static int64_t now_tick(void);
+/* one line per decoded DCF77 minute; the e-CzasPL time is only compared, never used */
+static void dcf_time_report(void)
+{
+    static const char *ST[] = { "-", "not decodable", "decoded (unconfirmed)", "confirmed", "confirmed by the expected frame" };
+    char m[240], cmp[64] = "", b1[16], b2[16];
+    uint32_t sec, us;
+    if (dcfb.status == DCFT_CONFIRMED || dcfb.status == DCFT_PREDICTED || dcfb.status == DCFT_UNCONFIRMED) {
+        /* the code is the time of the next minute, which starts ~1 s after second 58 ends */
+        if (tk_time(&tk, now_tick() + 1 * (int64_t)FCY_HZ, &sec, &us)) {
+            int64_t ez_min = ((int64_t)sec + 30) / 60;
+            int64_t d = (int64_t)dcfb.utc_min - ez_min;
+            if (d == 0) snprintf(cmp, sizeof cmp, " | e-CzasPL: same minute");
+            else snprintf(cmp, sizeof cmp, " | e-CzasPL differs by %ld min", (long)d);
+        }
+        snprintf(m, sizeof m, "TIME %04d-%02d-%02d %02d:%02d %s %s (bits repaired %d, PM seconds %d, AM=PM %d, fit %s lead %s)%s",
+                 dcfb.year, dcfb.month, dcfb.day, dcfb.hour, dcfb.minute, dcfb.cest ? "CEST" : "CET", ST[dcfb.status],
+                 dcfb.flips, dcfb.bits_pm, dcfb.am_pm_agree, f1(b1, dcfb.pred_score, 0), f1(b2, dcfb.pred_margin, 0), cmp);
+    } else {
+        snprintf(m, sizeof m, "TIME %s (PM seconds %d, AM=PM %d, fit %s lead %s) | decoded %lu, confirmed %lu, by expected frame %lu, failed %lu",
+                 ST[dcfb.status], dcfb.bits_pm, dcfb.am_pm_agree, f1(b1, dcfb.pred_score, 0), f1(b2, dcfb.pred_margin, 0),
+                 dcfb.n_decoded, dcfb.n_confirmed, dcfb.n_predicted, dcfb.n_failed);
+    }
+    put_line("DCF77", m);
+}
+
 static void station_samples(float er, float ei, float dr, float di)
 {
     float a, b, ir, ii;
@@ -406,6 +434,7 @@ static void station_samples(float er, float ei, float dr, float di)
         ecz_push(&ez, (int16_t)lrintf(atan2f(ii, ir) * (32768.0f / (float)M_PI)));
     coh_push(&trk_d, dr, di, &a, &b, &ir, &ii);
     dcf_push(&dcf, a, b, trk_d.state == COH_TRACK);
+    if (dcfbits_push(&dcfb, &dcf, a, b, dcf.n - 1, trk_d.state == COH_TRACK)) dcf_time_report();
     n2k++;
     if (dcf_block_ready(&dcf)) {
         dcf_block(&dcf, trk_d.state == COH_TRACK ? (float)trk_d.hz : 0.0f);
@@ -567,7 +596,7 @@ int main(void)
         coh_init(&trk_e, &ce); coh_init(&trk_d, &cd);
     }
     ecz_init(&ez);
-    dcf_init(&dcf);
+    dcf_init(&dcf); dcfbits_init(&dcfb);
     tk_init(&tk);
     lse_init();
     set_mix(F_CARRIER * FS_NOM_HZ / FS_GUESS_HZ);
