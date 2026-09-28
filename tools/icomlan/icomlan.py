@@ -286,7 +286,8 @@ class Recorder:
         self.w = None; self.w_end = 0; self.last_len = 0
         # timing guard: the radio sometimes drops audio without a sequence gap (WLAN congestion);
         # arrival time vs samples written shows it -> silence is inserted, the file time stays right
-        self.arr = {}; self.t0 = None; self.lags = []; self.inserted = 0
+        self.arr = {}; self.t0 = None; self.inserted = 0
+        self.win_t = self.win_min = None; self.mins = []; self.reanchor = 0
         self.last_audio = None
 
     def add(self, seq, pcm, stream):
@@ -296,6 +297,8 @@ class Recorder:
         dist = (seq - self.expect) & 0xffff
         if dist >= 0x8000: return                            # late duplicate
         self.hold[seq] = pcm; self.hold_t[seq] = time.time(); self.arr[seq] = time.time()
+        if len(self.arr) > 500:
+            for k in [k for k, t in self.arr.items() if t < time.time() - 5]: del self.arr[k]
         if dist > 0:                                         # gap: ask again once
             s = self.expect
             while s != seq:
@@ -313,6 +316,7 @@ class Recorder:
                 self.last_len = len(pcm); self.guard(self.arr.pop(self.expect, now)); self.write(pcm)
             elif self.hold and min(t for s, t in self.hold_t.items() if s in self.hold) < now - 0.3:
                 self.hold_t.pop(self.expect, None)
+                self.arr.pop(self.expect, None)
                 self.lost += 1; self.write(bytes(self.last_len))
             else:
                 break
@@ -320,17 +324,30 @@ class Recorder:
             force = False
 
     def guard(self, t_arr):
-        """insert silence when the samples fall behind the packets' arrival times"""
+        """insert silence when the samples fall behind the packets' arrival times.
+        Robust version (28 Sep 13:30; the first one inserted 10,236 s in 10 min): per second the
+        smallest lag, reference = median of the last 30 such minima; a deficit > 0.1 s for two
+        seconds in a row is filled, at most 1 s at a time; > 5 s is a restart, not a gap."""
         fr = self.bps * self.ch
         if self.t0 is None: self.t0 = t_arr
         lag = t_arr - (self.t0 + self.samples / self.a.rate)
-        self.lags.append((t_arr, lag))
-        while self.lags and self.lags[0][0] < t_arr - 30: self.lags.pop(0)
-        base = min(l for _, l in self.lags)
-        if lag - base > 0.1:
-            n = int((lag - base) * self.a.rate)
-            self.write(bytes(n * fr)); self.inserted += n
-            self.lags = [(t, l - n / self.a.rate) for t, l in self.lags]
+        if self.win_t is None or t_arr - self.win_t >= 1.0:
+            if self.win_min is not None:
+                self.mins.append(self.win_min); self.mins = self.mins[-30:]
+                if len(self.mins) >= 10:
+                    base = sorted(self.mins)[len(self.mins) // 2]
+                    d1, d2 = self.mins[-1] - base, self.mins[-2] - base
+                    if d1 > 5.0:
+                        log(f"timing guard: {d1:.1f} s behind - re-anchored (no silence inserted)")
+                        self.t0 += d1; self.mins = []; self.reanchor += 1
+                    elif d1 > 0.1 and d2 > 0.1:
+                        dd = min(d1, d2, 1.0); n = int(dd * self.a.rate)
+                        self.write(bytes(n * fr)); self.inserted += n
+                        self.mins = self.mins[:-2]        # the reference (older minima) stays
+                        lag -= n / self.a.rate
+            self.win_t, self.win_min = t_arr, lag
+        else:
+            self.win_min = min(self.win_min, lag)
 
     def write(self, pcm):
         a = self.a
@@ -420,7 +437,7 @@ def main():
             if now >= next_stats:
                 dt = now - st0[0]
                 rate = (rec.samples - st0[1]) / dt
-                log(f"stats: {rec.pkts} packets, lost {rec.lost}, retransmit asked {rec.rtx}, silence inserted {rec.inserted / a.rate:.2f} s, "
+                log(f"stats: {rec.pkts} packets, lost {rec.lost}, retransmit asked {rec.rtx}, silence inserted {rec.inserted / a.rate:.2f} s, re-anchored {rec.reanchor}, "
                     f"{rate:.1f} samples/s over {dt:.0f} s, buffered {len(rec.hold)}")
                 st0 = (now, rec.samples, 0); next_stats = now + a.stats
     except KeyboardInterrupt:
