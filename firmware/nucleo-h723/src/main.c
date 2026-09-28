@@ -358,7 +358,7 @@ static int dcf_blocks_locked; static float dcf_line_hz = 1e9f;
    (a local spur can be tracked, but it has no 1-s amplitude pattern) */
 static int dcf_verified(void)
 {
-    return trk_d.state == COH_TRACK && dcf.have_mark && dcf.mark_sigma >= 6 && fabsf((float)trk_d.hz - dcf_line_hz) < 0.05f;
+    return trk_d.state == COH_TRACK && dcf.have_mark && dcf.mark_sigma >= 6 && fabsf((float)trk_d.hz - dcf_line_hz) < 0.15f;
 }
 static const char *dcf_state_txt(void)
 {
@@ -393,9 +393,11 @@ static void station_samples(float er, float ei, float dr, float di)
     if (dcf_block_ready(&dcf)) {
         dcf_block(&dcf, trk_d.state == COH_TRACK ? (float)trk_d.hz : 0.0f);
         /* carrier check: a DCF77 carrier has second marks; none 60 min after locking
-         * onto a line -> it is something else (a local spur): reject it, search again */
+         * onto a line -> it is something else (a local spur): reject it, search again.
+         * The count goes on through re-searches that find the same line again (+-0.15 Hz:
+         * a spur moves with the LSE and is often lost and found again) */
         if (trk_d.state != COH_SEARCH) {
-            if (fabsf((float)trk_d.hz - dcf_line_hz) > 0.05f) { dcf_line_hz = (float)trk_d.hz; dcf_blocks_locked = 1; }
+            if (fabsf((float)trk_d.hz - dcf_line_hz) > 0.15f) { dcf_line_hz = (float)trk_d.hz; dcf_blocks_locked = 1; }
             else dcf_blocks_locked++;
         }
         if (dcf_blocks_locked >= 6 && dcf.mark_sigma < 6) {

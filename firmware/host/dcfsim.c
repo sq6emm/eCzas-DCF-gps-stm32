@@ -37,7 +37,7 @@ int main(int argc, char **argv)
              * -> this line is something else (a local spur): reject it and search again. */
             static int blocks_locked = 0; static float line_hz = 1e9;
             if (trk.state == COH_SEARCH) ;                                  /* keep counting through re-searches */
-            else if (fabsf((float)trk.hz - line_hz) > 0.05f) { line_hz = (float)trk.hz; blocks_locked = 1; }
+            else if (fabsf((float)trk.hz - line_hz) > 0.15f) { line_hz = (float)trk.hz; blocks_locked = 1; }
             else blocks_locked++;
             if (blocks_locked >= 6 && dcf.mark_sigma < 6) {
                 printf("# reject %.3f Hz (no second marks after %d blocks)\n", trk.hz, blocks_locked);
