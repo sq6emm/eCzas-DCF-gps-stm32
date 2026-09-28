@@ -1,4 +1,4 @@
-# LF time & frequency receiver board — design draft (v0.1, 28 Sep 2026)
+# LF time & frequency receiver board — design draft (v0.2, 28 Sep 2026)
 
 One board that does what the NUCLEO + rods do today, plus a GPS timing receiver as the truth
 reference and an OCXO steered from e-CzasPL and/or DCF77. Draft for discussion; nothing is
@@ -89,25 +89,40 @@ a GPSDO-grade reference.
 - UART for UBX; backup supply (supercap) for fast restarts; SMA antenna input with 3.3/5 V
   antenna bias through a current limiter (active antenna, short-circuit safe).
 
-### 3.4 OCXO
-**Will the CTI OCXOs be enough? Very likely yes.** A steered OCXO only has to be better than the
-reference over the loop time constant: the station carriers are measured with ~1e-8 at 1 min
-(today's first data) and only reach 1e-11...1e-12 after hours, so the loop time constant is
-1000-10000 s and the OCXO must hold ~1e-11 over that time — typical 10 MHz OCXOs (ADEV ~1e-11
-from 1 to 100 s, aging ~1e-9/day, temperature ~1e-9 over the range) do. The loop removes aging
-and temperature drift. Needed from you: **the exact CTI model / markings** (e.g. OSC5A2B02-type:
-supply 5 V or 12 V, square or sine output, EFC range and slope, warm-up current).
+### 3.4 OCXO: CTI OSC5A2B02 (the user has many)
+Datasheet (scan, e.g. dl6gl.de/media/files/ocxo-cti-osc5a2b02-datasheet.pdf):
 
-Proposal:
-- On-board footprint for the CTI package **and** an SMA/header input so any other OCXO or a
-  GPSDO can be plugged instead (and to compare OCXOs).
-- Own low-noise supply (LDO like LT3045 from 5 V, or 12 V rail if a 12 V OCXO), sized for the
-  warm-up current (often 0.3-0.6 A for a few minutes).
-- EFC: **16-bit DAC** (DAC8551 / AD5541A) + precision reference (REF5040, 4.096 V) + RC/2-pole
-  filter + divider matched to the OCXO's EFC range. With a typical +-0.5 ppm over 4 V the step
-  is ~1.5e-11 per LSB (dithering / 18-20-bit AD5781 if finer steps are needed).
-- Temperature sensor next to the OCXO (TMP117) — for the loop and the holdover model.
-- Thermal: OCXO away from the regulators, under a foam cover in the enclosure.
+| parameter | value |
+|---|---|
+| frequency | 10.00 MHz, initial accuracy <= +-200 ppb (Vc = 2.0 V, 25 C, 15 min after power-on) |
+| supply | +5.0 V +-5 %, <= 600 mA at start, <= 250 mA stable; within +-100 ppb after <= 5 min |
+| output | HCMOS, VOH >= 4.5 V, VOL <= 0.5 V, 15 pF load, rise/fall <= 6 ns, duty 45/55 % |
+| control ("Vref" pin = EFC input) | 2.0 +- 2.0 V, positive slope; -2.0..-1.0 ppm at 0 V, -0.2..+0.2 at 2 V, +1.0..+2.0 at 4 V (~0.75 ppm/V), linearity < +-10 %, input >= 100 kOhm, bandwidth > 10 kHz |
+| stability | ageing <= +-0.5 ppb/day (after 30 days), <= +-100 ppb first year; temperature <= +-10 ppb (0..75 C); short term <= 0.05 ppb/s; supply +-5 % -> <= +-2 ppb; load +-5 % -> <= +-2 ppb |
+| phase noise | -80 dBc/Hz @1 Hz, -120 @10 Hz, -140 @100 Hz, -145 @1 kHz, -150 @10 kHz |
+| package | 25.4 x 25.4 x 12.5 mm, 5 pins: 1 Out, 2 GND, 3 Vref (EFC), 4 NC, 5 Vcc |
+
+Enough? **Yes.** A steered OCXO only has to beat the reference over the loop time constant: the
+station carriers need hours to reach 1e-11...1e-12 (first comparison: 1.4e-8 at 60 s), so the loop
+runs at 1000-10000 s and this OCXO (5e-11 at 1 s, ageing 0.5 ppb/day, 10 ppb over 0-75 C) is far
+better over that time; the loop removes ageing and temperature. Holdover: ageing alone adds
+~20 us per day of time error. With many units: burn in a few against the GPS PPS, fit the best.
+
+Design consequences:
+- **Supply**: own low-noise linear 5 V for 0.6 A warm-up / 0.25 A running (e.g. buck to ~6 V, then
+  a 1 A LDO such as TPS7A4701); 2 ppb per 5 % supply change -> the supply must be quiet and stable.
+- **Clock to the MCU**: 5 V HCMOS -> 74LVC1G17 (3.3 V supply, input tolerant to 5.5 V) -> OSC_IN
+  (HSE bypass). Short trace, series 33 Ohm, ground guard.
+- **10 MHz outputs**: separate buffer(s) from the OCXO pin (e.g. 74AC04 / 74LVC2G14 on 5 V for
+  the square output; + 50 Ohm, attenuator and LPF footprint for a sine-ish output to the IC-7610
+  REF IN), so a load on an output cannot disturb the MCU clock.
+- **EFC**: 16-bit DAC (DAC8551 / AD5541A) + REF5040 (4.096 V). Full 0-4.096 V gives 62.5 uV =
+  ~4.7e-11 per LSB (0.75 ppm/V) - coarse against the 1e-11 goal, so the DAC output goes through a
+  divider/offset network to ~1.0-3.0 V (still +-0.75 ppm, covers the +-200 ppb initial offset
+  and years of ageing): ~2.3e-11 per LSB, finer by dithering inside the loop time constant.
+  Alternative: 18-bit DAC (DAC9881 / AD5781). 2-pole RC after the DAC (corner ~1-10 Hz).
+- Temperature sensor next to the OCXO (TMP117); foam cover in the enclosure, away from the regulators.
+- Footprint for the OSC5A2B02 **and** an SMA/header input for an external 10 MHz (other OCXO / GPSDO).
 
 ### 3.5 Outputs and interfaces
 - **10 MHz out x2 (SMA)**: buffered from the OCXO; one 50-Ohm sine-ish (LPF) for the IC-7610
@@ -140,7 +155,7 @@ Proposal:
 The e-CzasPL and DCF77 receivers (coh.c, ecz.c, eCzas core, dcf.c, dcfbits.c) stay as they are.
 
 ## 5. Open questions (for the user)
-1. CTI OCXO: exact model/markings, supply voltage, output type, EFC range; how many, same type?
+1. ~~CTI OCXO~~: answered - OSC5A2B02, 5 V, many units (section 3.4).
 2. GPS module: NEO-M8T/LEA-M8T (recommended) or ZED-F9T? Antenna type you have?
 3. Ethernet on v1: yes / later?
 4. Board size / enclosure you have in mind; connectors (screw terminals vs JST for the rods)?
