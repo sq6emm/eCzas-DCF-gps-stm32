@@ -16,6 +16,7 @@ instead of demodulated AF.
 | `if2af_watch.py` | converts every finished IF file into the input directory of the eCzas reference pipeline |
 | `cmp_usb_lan.py` | same time window, USB AF recording vs LAN IF, both through the eCzas firmware simulator |
 | `spec.py` | spectrum / strongest lines of a recording |
+| `eczas_proc.py` | copy of the e-CzasPL reference processor (`proc.py` of eczas-ic705-proc / eczas-ic7610-proc / kiwi-ref-proc): firmware sim + slot classifier per 10-min file; each file gets the last 30 s of the previous one in front (the frame across the join is no longer lost) |
 | `dcf7610.py` | IC-7610 SUB (DCF77) -> 2 kHz complex files, hourly `dcfsim` + `dcfminsim` (the NUCLEO code) |
 | `k9ay_scan.sh`, `k9ay_analyse.py` | K9AY direction / LNA scan during one IC-7610 recording, C/N0 per setting |
 
