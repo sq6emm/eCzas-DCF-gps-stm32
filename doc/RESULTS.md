@@ -115,3 +115,58 @@ what a tuned antenna would give.
 10-min block, lag −8.19 … −8.89 ms; over 30 min 9–13σ, lag **−8.42 … −8.65 ms**. One block
 (19:40) was too weak (2.5σ). The amplitude pattern is only 1–2σ per block; over 10 minutes
 the phase code is the useful measure. The overnight run (sky wave on both paths) follows.
+
+## Night 27/28 Sep 2026
+
+### e-CzasPL reception, three receivers + QDX
+
+Share of the time frames the IC-705 saw (`tools/compare3.py`, 2-hour windows). The IC-705
+switched itself off on a flat battery at 00:15–00:36 and 01:05–04:51, so those windows have
+little or no reference; the NUCLEO column is then its own count against ~290 frames/h.
+
+| window (UTC) | IC-705 (frame loop) | NUCLEO (ferrite, M3) | Legnica (eCzas board) |
+|---|---|---|---|
+| 20–22 | 99.7 % | 92.4 % | 38.7 % |
+| 22–00 | 99.8 % | 92.2 % (reflashes, the 10-min sample-skip bug) | 24.8 % |
+| 00–02 | 99.5 % (partly off) | 96.9 % | 13.3 % |
+| 02–04 | off | 295–310 frames/h | – |
+| 04–05:47 | 100 % | **98.9 %** | 16.1 % |
+
+- NUCLEO: 262–310 decoded+confirmed per hour all night, 0 time steps, 0 wrong times.
+  Garbled low-SNR frames with nonsense dates were all rejected.
+- Legnica: 0 wrong times; short carrier losses (≤100 s) at night and dawn.
+- QDX472A + K9AY (224 kHz outside its band, 630 m filter): 34 runs, C/N0 3–36 dB-Hz, best
+  22:52, never a decoded frame.
+
+### DCF77 timing against the NUCLEO's e-CzasPL second (eCzas-assisted phase code, `dcf_track.py`)
+
+| hour (UTC) | DCF77 carrier dB | 30-min lag, ms (σ) | eCzas frames/h | eCzas noise ° |
+|---|---|---|---|---|
+| 18 | 26.0 | −8.47 (8–11) | 272 | 7.8 |
+| 19 | 27.4 | −8.52 (8–13) | 288 | 7.9 |
+| 20 | 24.0 | −8.42 (8–10) | 270 | 7.7 |
+| 21 | 23.0 | −8.12 (6) | 276 | 7.8 |
+| 22 | 22.7 | −8.14 (6) | 275 | 7.9 |
+| 23–03 | 15.5–18.6 | below 5σ | 262–304 | 8.4–10.1 |
+| 04 | 24.2 | −8.89 (6–7) | 221 (reflash) | 9.5 |
+| 05 | 18.5 | −8.99 (5) | 284 | 8.9 |
+
+- **Dusk (~20:35):** the DCF77 carrier fell by ~3 dB and the site noise rose ~1.5 dB. The lag
+  moved slightly, −8.5 → −8.1 ms.
+- **23–03:** too weak for the phase code at the 5σ level.
+- **Dawn:** back to −8.9…−9.0 ms. The difference of about 0.8 ms between evening and dawn is at
+  the edge of what 5–8σ allows, but it points to a sky-wave contribution on one of the two paths.
+- **e-CzasPL was unaffected by night:** frames per hour and loop noise stayed flat, so the moves
+  come from the DCF77 path.
+
+### Standalone DCF77 on the NUCLEO (no eCzas input)
+
+- Locked on the real carrier 02:00–03:37 (second marks 12–15σ; minute found at 02:10).
+- Its second lay −6.9…−10.7 ms from the eCzas second, consistent with the assisted result.
+- The first night also showed three things to fix, all fixed and flashed that night:
+  - the fold did not follow the crystal's drift (fixed 03:39);
+  - the spur check restarted on every re-find (fixed 04:38, spur rejected at 05:48);
+  - a 10-min evaluation skipped samples (fixed 23:50).
+- Carrier: 38 one-minute values of eCzas−DCF77 give **−0.5 ± 3.1 ppb**. Both carriers were
+  measured against the same LSE crystal, so its error cancels: the two transmitters agree within
+  about 3 ppb.
