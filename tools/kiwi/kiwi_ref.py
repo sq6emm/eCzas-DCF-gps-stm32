@@ -141,6 +141,10 @@ def dcf_runner():
         end = int(now // SLOT) * SLOT                    # end of the last finished slot
         if now - end > 150 and end % 3600 == 0 and end != last:
             last = end; start = end - 6 * 3600
+            # begin at the first recorded slot: a zero-filled lead-in lets the tracker lock on
+            # "nothing" and the spur rule then rejects 0 Hz, i.e. DCF77 itself (12:00 run, 28 Sep)
+            while start < end and not os.path.exists(C64 + "/" + time.strftime("%Y%m%d_%H%M%S", time.gmtime(start)) + ".c64"):
+                start += SLOT
             tmp = "/tmp/dcf6h.c64"; have = 0
             with open(tmp, "wb") as f:
                 for t in range(start, end, SLOT):
@@ -155,7 +159,7 @@ def dcf_runner():
                 if rows:
                     with open(OUT + "/dcf.csv", "a") as f:
                         f.write(time.strftime("%Y-%m-%d %H:%M", time.gmtime(end)) + f",{have}," + ",".join(rows[-1].replace("|", " ").split()) + "\n")
-                log(f"dcfsim {name}: {have}/36 slots; last: {rows[-1] if rows else '-'}")
+                log(f"dcfsim {name}: {have}/{(end - start) // SLOT} slots from {time.strftime('%H:%M', time.gmtime(start))}; last: {rows[-1] if rows else '-'}")
         time.sleep(30)
 
 
