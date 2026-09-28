@@ -15,7 +15,7 @@ CFLAGS = $(CFLAGS_EXTRA) $(CPU) -O2 -g -Wall -ffunction-sections -fdata-sections
 LDFLAGS = $(CPU) -T STM32H723ZG.ld --specs=nano.specs --specs=nosys.specs -Wl,--gc-sections -Wl,-Map=build/rx.map -Wl,--print-memory-usage
 HALSRC = hal hal_cortex hal_rcc hal_rcc_ex hal_pwr hal_pwr_ex hal_gpio hal_dma hal_dma_ex hal_adc hal_adc_ex \
          hal_uart hal_uart_ex hal_tim hal_tim_ex hal_flash hal_flash_ex
-SRC = $(wildcard src/*.c) $(COMMON)/coh.c $(COMMON)/ecz.c $(COMMON)/dcf.c $(COMMON)/dcfbits.c $(ECZAS)/frame.c $(ECZAS)/timekeeper.c $(DEV)/Source/Templates/system_stm32h7xx.c $(foreach m,$(HALSRC),$(HAL)/Src/stm32h7xx_$(m).c)
+SRC = $(wildcard src/*.c) $(COMMON)/coh.c $(COMMON)/ecz.c $(COMMON)/dcf.c $(COMMON)/dcfbits.c $(COMMON)/efc.c $(ECZAS)/frame.c $(ECZAS)/timekeeper.c $(DEV)/Source/Templates/system_stm32h7xx.c $(foreach m,$(HALSRC),$(HAL)/Src/stm32h7xx_$(m).c)
 OBJ = $(patsubst %.c,build/%.o,$(notdir $(SRC))) build/startup.o
 vpath %.c src $(COMMON) $(ECZAS) $(HAL)/Src $(DEV)/Source/Templates
 all: build/rx.bin

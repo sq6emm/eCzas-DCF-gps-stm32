@@ -32,6 +32,7 @@
 #include "ecz.h"
 #include "dcf.h"
 #include "dcfbits.h"
+#include "efc.h"
 #include "frame.h"
 #include "timekeeper.h"
 
@@ -304,6 +305,7 @@ static int lse_ok;
 #ifdef OCXO_REF
 static TIM_HandleTypeDef htim2, htim3;
 static int ocxo_itr = -1;
+static efc_t efc;                          /* EFC steering from the carriers (common/efc.c) */
 static void efc_set(uint32_t code)
 {
     DAC1->DHR12R2 = code & 0xFFF;
@@ -314,6 +316,7 @@ static void ocxo_init(void)
     __HAL_RCC_DAC12_CLK_ENABLE();
     DAC1->CR |= DAC_CR_EN2;
     efc_set(EFC_INIT);
+    efc_init(&efc, EFC_INIT);
     /* PA0 = TIM2_ETR (AF1) */
     __HAL_RCC_GPIOA_CLK_ENABLE(); __HAL_RCC_TIM2_CLK_ENABLE(); __HAL_RCC_TIM3_CLK_ENABLE();
     GPIO_InitTypeDef g = {0};
@@ -753,6 +756,9 @@ int main(void)
             pl_ok = 1;
         }
         process_block(b, mean, mean2);
+#ifdef OCXO_REF
+        efc_set((uint32_t)efc_tick(&efc, BLOCK / FS_NOM_HZ));   /* ramp + dither, once per block */
+#endif
         if (ez.cand_ready) handle_candidate();
         { uint32_t dc = DWT->CYCCNT - c0; busy_cyc += dc; if (dc > max_blk_cyc) max_blk_cyc = dc; }
 
@@ -777,6 +783,19 @@ int main(void)
                      dcf_state_txt(),
                      (re.state == COH_TRACK && dcf_verified()) ? f1(b6, ppb, 1) : "-");
             put_line("CARRIER", m);
+#ifdef OCXO_REF
+            {   /* steer the OCXO: DCF77 (PTB) first, e-CzasPL when DCF77 is not verified */
+                int src = EFC_SRC_NONE; double y = 0;
+                if (rd2.state == COH_TRACK && dcf_verified()) { src = EFC_SRC_DCF77; y = rd2.freq_hz / F_DCF; }
+                else if (re.state == COH_TRACK && re.err_deg < 25) { src = EFC_SRC_ECZAS; y = re.freq_hz / F_CARRIER; }
+                efc_minute(&efc, src, y, 60.0);
+                static const char *SRC[] = { "none", "DCF77", "e-CzasPL" };
+                snprintf(m, sizeof m, "EFC %s = %s V, %s, source %s, offset %s ppb, time error %s ns, slope %s ppb/code",
+                         f1(b1, efc.c, 0), f3(b7, efc.c * 3.3 / 4096), efc_state_txt(&efc), SRC[src],
+                         src ? f1(b2, y * 1e9, 1) : "-", f1(b3, efc.x * 1e9, 1), f3(b8, efc.slope * 1e9));
+                put_line("OCXO", m);
+            }
+#endif
         }
 #ifdef CLOCK_TEST
         if (lse_log_n == 64) {
@@ -806,7 +825,7 @@ int main(void)
             uint32_t sec;
             char d1[40] = "no time yet", b4[16];
             if (tk_time(&tk, now_tick(), &sec, 0)) date_str(d1, sec, 0);
-            snprintf(m, sizeof m, "%s | eCzas carrier %s %s Hz noise %s deg lvl0 %s | heard %lu, decoded %lu, confirmed %lu, rejected %lu | DCF77 carrier %s %s mHz | clock %+ld ppm (LSE) | cpu %lu%%, longest block %lu ms, max lag %lu ms | adc A0 mean %ld min %lu max %lu, A1 mean %ld min %lu max %lu%s",
+            snprintf(m, sizeof m, "%s | eCzas carrier %s %s Hz noise %s deg lvl0 %s | heard %lu, decoded %lu, confirmed %lu, rejected %lu | DCF77 carrier %s %s mHz | clock %+ld ppm (" REF_NAME ") | cpu %lu%%, longest block %lu ms, max lag %lu ms | adc A0 mean %ld min %lu max %lu, A1 mean %ld min %lu max %lu%s",
                      d1, PS[trk_e.state], f1(b1, trk_e.hz, 1), f1(b2, trk_e.err_avg * 360, 0), f1(b3, trk_e.lvl0 * 360, 0),
                      (unsigned long)n_heard, (unsigned long)n_decoded, (unsigned long)n_conf, (unsigned long)n_rej,
                      dcf_state_txt(), f1(b4, trk_d.hz * 1000, 1), (long)lround((cur_tps_ratio - 1) * 1e6),
