@@ -272,16 +272,91 @@ static uint64_t samples_written(void)      /* total ADC samples the DMA has stor
    8th edge. The sum of capture intervals over 4096 captures = timer ticks per
    LSE second, i.e. the true timer clock frequency. */
 TIM_HandleTypeDef htim16;
+#ifdef OCXO_REF
+/* Reference = external 10 MHz OCXO on PA0 (D32, CN10 pin 29; 5 V HCMOS through 1k/2k):
+   TIM2 counts it (ETR, external clock mode 2), updates every 2500 counts (4 kHz, TRGO) and
+   TIM3 - clocked like TIM6 - captures those updates (IC1 on TRC, internal trigger from TIM2),
+   exactly like TIM16 captures the LSE otherwise. EFC: DAC1 channel 2 on PA5 (D13). */
+#define REF_TIM      TIM3
+#define REF_CAP_S    (2500.0 / 10.0e6)    /* seconds between captures */
+#define REF_NAME     "OCXO"
+#ifndef LSE_WIN
+#define LSE_WIN 4000                     /* captures per measurement: 1 s */
+#endif
+#ifndef EFC_INIT
+#define EFC_INIT 2048                    /* DAC code at start (mid-scale) */
+#endif
+#else
+#define REF_TIM      TIM16
+#define REF_CAP_S    (8.0 / 32768.0)
+#define REF_NAME     "LSE"
+#endif
 #ifndef LSE_WIN
 #define LSE_WIN 4096                     /* captures per measurement: 4096 = 1 s, 512 = 1/8 s */
 #endif
-#define LSE_TPS_NOM (200000000.0 * LSE_WIN / 4096.0)
+#define LSE_TPS_NOM (200000000.0 * LSE_WIN * REF_CAP_S)
 static volatile uint32_t lse_last, lse_sum, lse_cnt, lse_tps, lse_seq;
 static volatile uint32_t lse_log[64]; static volatile int lse_log_n;
 static volatile uint64_t lse_tot_ticks, lse_tot_caps;   /* running totals for per-block rate */
 #define CAPR 512                           /* ring of capture tick counts (125 ms) */
 static volatile uint64_t cap_tick[CAPR];
 static int lse_ok;
+#ifdef OCXO_REF
+static TIM_HandleTypeDef htim2, htim3;
+static int ocxo_itr = -1;
+static void efc_set(uint32_t code)
+{
+    DAC1->DHR12R2 = code & 0xFFF;
+}
+static void ocxo_init(void)
+{
+    /* EFC: DAC1 channel 2 on PA5 (analog by default), buffered, mid-scale */
+    __HAL_RCC_DAC12_CLK_ENABLE();
+    DAC1->CR |= DAC_CR_EN2;
+    efc_set(EFC_INIT);
+    /* PA0 = TIM2_ETR (AF1) */
+    __HAL_RCC_GPIOA_CLK_ENABLE(); __HAL_RCC_TIM2_CLK_ENABLE(); __HAL_RCC_TIM3_CLK_ENABLE();
+    GPIO_InitTypeDef g = {0};
+    g.Pin = GPIO_PIN_0; g.Mode = GPIO_MODE_AF_PP; g.Pull = GPIO_NOPULL; g.Speed = GPIO_SPEED_FREQ_LOW; g.Alternate = GPIO_AF1_TIM2;
+    HAL_GPIO_Init(GPIOA, &g);
+    htim2.Instance = TIM2;
+    htim2.Init.Prescaler = 0; htim2.Init.Period = 2500 - 1; htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+    HAL_TIM_Base_Init(&htim2);
+    TIM_ClockConfigTypeDef cs = {0};
+    cs.ClockSource = TIM_CLOCKSOURCE_ETRMODE2; cs.ClockPolarity = TIM_CLOCKPOLARITY_NONINVERTED;
+    cs.ClockPrescaler = TIM_CLOCKPRESCALER_DIV1; cs.ClockFilter = 0;
+    HAL_TIM_ConfigClockSource(&htim2, &cs);
+    TIM_MasterConfigTypeDef mc = {0};
+    mc.MasterOutputTrigger = TIM_TRGO_UPDATE; mc.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+    HAL_TIMEx_MasterConfigSynchronization(&htim2, &mc);
+    /* TIM3: timer clock (as TIM6), IC1 on TRC = TIM2 TRGO via an internal trigger */
+    htim3.Instance = TIM3;
+    htim3.Init.Prescaler = 0; htim3.Init.Period = 0xFFFF; htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+    HAL_TIM_IC_Init(&htim3);
+    TIM_IC_InitTypeDef ic = {0};
+    ic.ICPolarity = TIM_ICPOLARITY_RISING; ic.ICSelection = TIM_ICSELECTION_TRC; ic.ICPrescaler = TIM_ICPSC_DIV1; ic.ICFilter = 0;
+    HAL_TIM_IC_ConfigChannel(&htim3, &ic, TIM_CHANNEL_1);
+    HAL_NVIC_SetPriority(TIM3_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(TIM3_IRQn);
+    HAL_TIM_Base_Start(&htim2);
+    HAL_TIM_IC_Start_IT(&htim3, TIM_CHANNEL_1);
+    /* which internal trigger carries TIM2's TRGO? (TIM3: ITR1 per the usual STM32 mapping) -
+       try each for 250 ms and keep the one that gives 4 kHz */
+    static const uint32_t itr[4] = { TIM_TS_ITR1, TIM_TS_ITR0, TIM_TS_ITR2, TIM_TS_ITR3 };
+    for (int k = 0; k < 4 && ocxo_itr < 0; k++) {
+        TIM_SlaveConfigTypeDef sc = {0};
+        sc.SlaveMode = TIM_SLAVEMODE_DISABLE; sc.InputTrigger = itr[k];
+        HAL_TIM_SlaveConfigSynchro(&htim3, &sc);
+        __HAL_TIM_ENABLE_IT(&htim3, TIM_IT_CC1);
+        uint32_t c0 = lse_tot_caps, t0 = HAL_GetTick();
+        while (HAL_GetTick() - t0 < 250) {}
+        uint32_t n = (uint32_t)(lse_tot_caps - c0);
+        if (n > 900 && n < 1100) ocxo_itr = k;                 /* 4 kHz x 0.25 s = 1000 */
+    }
+    lse_ok = ocxo_itr >= 0;
+}
+#endif
+#ifndef OCXO_REF
 static void lse_init(void)
 {
     RCC_OscInitTypeDef o = {0};
@@ -302,10 +377,15 @@ static void lse_init(void)
     HAL_NVIC_EnableIRQ(TIM16_IRQn);
     HAL_TIM_IC_Start_IT(&htim16, TIM_CHANNEL_1);
 }
+#endif
+#ifdef OCXO_REF
+void TIM3_IRQHandler(void)
+#else
 void TIM16_IRQHandler(void)
+#endif
 {
-    if (TIM16->SR & TIM_SR_CC1IF) {
-        uint32_t c = TIM16->CCR1;              /* reading CCR1 clears CC1IF */
+    if (REF_TIM->SR & TIM_SR_CC1IF) {
+        uint32_t c = REF_TIM->CCR1;            /* reading CCR1 clears CC1IF */
         uint32_t d = (c - lse_last) & 0xFFFF;
         lse_last = c;
         if (lse_cnt) { lse_sum += d; lse_tot_ticks += d; lse_tot_caps++; }
@@ -313,7 +393,7 @@ void TIM16_IRQHandler(void)
         if (++lse_cnt == LSE_WIN + 1) { lse_tps = lse_sum; lse_seq++; lse_sum = 0; lse_cnt = 1;
             if (lse_log_n < 64) lse_log[lse_log_n++] = lse_tps; }
     }
-    TIM16->SR = 0;
+    REF_TIM->SR = 0;
 }
 
 static double cur_tps_ratio = 1.0;        /* true / nominal sample rate */
@@ -348,7 +428,7 @@ static double pl_cyc;                      /* mixer phase (cycles, fractional) a
 static void pl_calibrate(uint64_t written)
 {
     __disable_irq();
-    uint32_t n16 = TIM16->CNT, c6 = TIM6->CNT, ll = lse_last;
+    uint32_t n16 = REF_TIM->CNT, c6 = TIM6->CNT, ll = lse_last;
     uint64_t lt = lse_tot_ticks;
     __enable_irq();
     int64_t tick_now = (int64_t)lt + ((n16 - ll) & 0xFFFF);
@@ -598,16 +678,20 @@ int main(void)
     ecz_init(&ez);
     dcf_init(&dcf); dcfbits_init(&dcfb);
     tk_init(&tk);
+#ifdef OCXO_REF
+    ocxo_init();
+#else
     lse_init();
+#endif
     set_mix(F_CARRIER * FS_NOM_HZ / FS_GUESS_HZ);
     adc_init();
     if (lse_ok) {                        /* first LSE measurement (~1 s) sets the mixer */
         uint32_t t0 = HAL_GetTick();
         while (lse_seq < 2 && HAL_GetTick() - t0 < 3000) {}
         if (lse_seq >= 2) { cur_tps_ratio = (double)lse_tps / LSE_TPS_NOM; set_mix(F_CARRIER / cur_tps_ratio); }
-        snprintf(m, sizeof m, "LSE crystal reference OK: Nucleo clock %+ld ppm, mixer %lu Hz\r\n",
+        snprintf(m, sizeof m, REF_NAME " reference OK: Nucleo clock %+ld ppm, mixer %lu Hz\r\n",
                  (long)lround((cur_tps_ratio - 1) * 1e6), (unsigned long)lround(f_mix));
-    } else snprintf(m, sizeof m, "LSE crystal NOT running - no drift correction\r\n");
+    } else snprintf(m, sizeof m, REF_NAME " reference NOT running (no captures) - no drift correction\r\n");
     uart_puts(m);
 
     float mean = 32768.0f, mean2 = 32768.0f;
@@ -643,7 +727,7 @@ int main(void)
         adc_mean1 = mean; adc_mean2 = mean2;
         if (pl_ok) {                      /* phase-locked mixer for samples rd-BLOCK .. rd */
             double t1 = true_time(200 * (int64_t)rd + pl_c);
-            double dt = (t1 - pl_t) * (8.0 / 32768.0);        /* true seconds in this block */
+            double dt = (t1 - pl_t) * REF_CAP_S;              /* true seconds in this block */
             if (dt > 0.004 && dt < 0.006) {
                 double dcyc = F_true * dt;
                 double w = -2 * M_PI * dcyc / BLOCK;
