@@ -32,7 +32,7 @@ int main(int argc, char **argv)
         n++;
         if (dcf_block_ready(&dcf)) {
             coh_report_t r; coh_report(&trk, &r);
-            dcf_block(&dcf);
+            dcf_block(&dcf, trk.state == COH_TRACK ? (float)trk.hz : 0.0f);
             /* carrier check: a DCF77 carrier has second marks. No mark 60 min after locking
              * -> this line is something else (a local spur): reject it and search again. */
             static int blocks_locked = 0; static float line_hz = 1e9;
@@ -45,7 +45,7 @@ int main(int argc, char **argv)
             }
             double x = 0;
             if (B != 0 && dcf.have_mark) {
-                double ns = (double)(n - (n % 2000)) + dcf.mark + dcf.pm_lag_ms * 2.0;  /* a DCF77 second start */
+                double ns = (double)(n - (n % 2000)) + dcf.mark + (dcf.pm_sigma > 5 ? dcf.pm_lag_ms * 2.0 : 0);  /* a DCF77 second start */
                 double t = A + B * ns / 2000.0;
                 x = (t - floor(t + 0.5)) * 1000.0;
             }

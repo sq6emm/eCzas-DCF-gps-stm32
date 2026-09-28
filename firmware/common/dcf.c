@@ -116,12 +116,27 @@ int dcf_block_ready(const dcf_t *d)
     return d->n > 0 && d->n % ((uint64_t)DCF_SPS * DCF_BLOCK_S) == 0;
 }
 
-void dcf_block(dcf_t *d)
+void dcf_block(dcf_t *d, float carrier_hz)
 {
     static float sc[DCF_SPS];
     static float y2[2 * DCF_SPS];                   /* yr twice: no modulo in the inner loops */
     float med, sg; int m, k, best;
     /* second mark (running) */
+    /* the DCF77 second lasts (1 - carrier_hz/77500) * 2000 LSE samples: over one block its start
+     * moves by -carrier_hz/77500 * block samples through the LSE second; shift the running
+     * fold (and the mark) by the whole samples of that drift, keep the fraction */
+    d->slip += -(double)carrier_hz / 77500.0 * (double)DCF_SPS * DCF_BLOCK_S;
+    {
+        int sh = (int)floor(d->slip + 0.5);
+        if (sh > 50 || sh < -50) sh = 0, d->slip = 0;          /* implausible: ignore */
+        if (sh != 0) {
+            static float t[DCF_SPS];
+            for (k = 0; k < DCF_SPS; k++) t[(k + sh + DCF_SPS) % DCF_SPS] = d->yr[k];
+            memcpy(d->yr, t, sizeof t);
+            if (d->have_mark) d->mark = (d->mark + sh + DCF_SPS) % DCF_SPS;
+            d->slip -= sh;
+        }
+    }
     if (d->nsec > 0 && d->amp > 0)
         for (k = 0; k < DCF_SPS; k++) d->yr[k] = DCF_KEEP * d->yr[k] + d->yf[k] / (d->nsec * d->amp);
     memcpy(y2, d->yr, sizeof d->yr); memcpy(y2 + DCF_SPS, d->yr, sizeof d->yr);

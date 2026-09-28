@@ -391,7 +391,7 @@ static void station_samples(float er, float ei, float dr, float di)
     dcf_push(&dcf, a, b, trk_d.state == COH_TRACK);
     n2k++;
     if (dcf_block_ready(&dcf)) {
-        dcf_block(&dcf);
+        dcf_block(&dcf, trk_d.state == COH_TRACK ? (float)trk_d.hz : 0.0f);
         /* carrier check: a DCF77 carrier has second marks; none 60 min after locking
          * onto a line -> it is something else (a local spur): reject it, search again */
         if (trk_d.state != COH_SEARCH) {

@@ -43,6 +43,7 @@ typedef struct {
     float    pm_lag_ms;                 /* phase-code start relative to the second mark + 200 ms */
     float    pm_sigma;
     int      have_mark, have_minute;
+    double   slip;                      /* drift of the DCF77 second through the LSE time scale, samples (fraction kept) */
 } dcf_t;
 
 void dcf_init(dcf_t *d);
@@ -50,6 +51,9 @@ void dcf_init(dcf_t *d);
 void dcf_push(dcf_t *d, float i, float q, int valid);
 /* after every DCF_BLOCK_S seconds (d->n % (DCF_SPS*DCF_BLOCK_S) == 0) */
 int  dcf_block_ready(const dcf_t *d);
-void dcf_block(dcf_t *d);               /* evaluate the block, update results */
+/* evaluate the block, update results. carrier_hz = the DCF77 carrier offset measured by the
+ * DCF77 tracker in LSE time: it gives the LSE crystal's rate against DCF77 itself, and the
+ * fold of past blocks is shifted by the resulting drift of the DCF77 second (no other input). */
+void dcf_block(dcf_t *d, float carrier_hz);
 
 #endif
