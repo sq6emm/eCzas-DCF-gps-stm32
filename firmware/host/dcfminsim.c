@@ -55,7 +55,8 @@ int main(int argc, char **argv)
         n++;
         if (quick && !dcf.have_mark && trk.state == COH_TRACK && n % 20000 == 0 && dcf_quick_mark(&dcf, 10.0f))
             fprintf(stderr, "quick mark at %.0f s\n", n / 2000.0);
-        if (quick > 1 && n % 20000 == 0) { dcf_quick_minute(&dcf, getenv("DCF_QMIN") ? (float)atof(getenv("DCF_QMIN")) : 8.0f); dcf_quick_pm(&dcf); }
+        if (quick > 1 && n % 20000 == 6000 && !dcf_block_ready(&dcf)) dcf_quick_minute(&dcf, getenv("DCF_QMIN") ? (float)atof(getenv("DCF_QMIN")) : 8.0f);   /* samples as main.c */
+        if (quick > 1 && n % 20000 == 13000 && !dcf_block_ready(&dcf)) dcf_quick_pm(&dcf);
         if (blind && n == 360000 && !dcf.have_mark) coh_search(&trk);
         if (dcf_block_ready(&dcf)) {
             coh_report_t r; coh_report(&trk, &r);

@@ -530,7 +530,11 @@ static void station_samples(float er, float ei, float dr, float di)
     n2k++;
     /* until the first second marks: look for them every 10 s in the current block (>= 60 s tracked),
        instead of waiting for the first 10-min block (bench: marks at 120-240 s instead of 600 s) */
-    if (!dcf.have_mark && trk_d.state == COH_TRACK && n2k % 20000 == 0 && dcf_quick_mark(&dcf, 10.0f)) {
+    /* CPU: mark_find ~16 ms, pm_eval ~8 ms, dcf_block ~24 ms, and the sample ring holds 30 ms -
+       so the early checks run in their own samples (0 / 3 / 6.5 s of each 10 s) and never in the
+       sample of the 10-min block (all three with the block gave 32 ms and an OVERRUN, 21:38:43) */
+    int blk = dcf_block_ready(&dcf);
+    if (!blk && !dcf.have_mark && trk_d.state == COH_TRACK && n2k % 20000 == 0 && dcf_quick_mark(&dcf, 10.0f)) {
         char m[100], b1[16], b2[16];
         dcf_line_hz = (float)trk_d.hz; dcf_blocks_locked = 1; dcf_line_proven = 1;
         snprintf(m, sizeof m, "second marks found early: %s ms of the second, %s sigma", f1(b1, dcf.mark / 2.0, 0), f1(b2, dcf.mark_sigma, 0));
@@ -538,14 +542,14 @@ static void station_samples(float er, float ei, float dr, float di)
     }
     /* the same for the minute marker (8 sigma) and the phase code, until the first 10-min block:
        bench: first confirmed DCF77 minute after 12-15 min instead of 24-26 (15-17 dB-Hz) */
-    if (trk_d.state == COH_TRACK && n2k % 20000 == 0) {
+    if (!blk && trk_d.state == COH_TRACK && (n2k % 20000 == 6000 || n2k % 20000 == 13000)) {
         char m[100], b1[16], b2[16];
-        if (dcf_quick_minute(&dcf, 8.0f)) {
+        if (n2k % 20000 == 6000 && dcf_quick_minute(&dcf, 8.0f)) {
             snprintf(m, sizeof m, "minute found early: %s sigma", f1(b1, dcf.minute_sigma, 0));
             put_line("DCF77", m);
         }
         static int pm_said;
-        if (dcf_quick_pm(&dcf) && !pm_said) {
+        if (n2k % 20000 == 13000 && dcf_quick_pm(&dcf) && !pm_said) {
             pm_said = 1;
             snprintf(m, sizeof m, "phase code found early: %s ms, %s sigma", f1(b1, dcf.pm_lag_ms, 1), f1(b2, dcf.pm_sigma, 0));
             put_line("DCF77", m);
