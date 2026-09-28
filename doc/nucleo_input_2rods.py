@@ -22,7 +22,7 @@ def box(x0, y0, x1, y1, title):
     d.add(elm.Label().at(((x0 + x1) / 2, y1 + 0.35)).label(title, halign="center", color=BLUE))
 
 
-def channel(y_hot, y_cold, rod_label, c_label, pin_label, cable_y):
+def channel(y_hot, y_cold, rod_label, c_label, pin_label, cable_y, r_label, d_label):
     """rod at the antenna end, twisted pair, tuning capacitor at the board end"""
     d.add(elm.Inductor2(loops=5).at((0, y_hot)).to((0, y_cold)).label(rod_label, loc="top", ofst=0.25))
     d.add(elm.Line().at((0, y_hot)).to((7, y_hot)))
@@ -30,13 +30,20 @@ def channel(y_hot, y_cold, rod_label, c_label, pin_label, cable_y):
     d.add(elm.Label().at((3.5, cable_y)).label("twisted pair (up to ~1 m)", halign="center", color=GREY))
     d.add(elm.Dot().at((7, y_hot))); d.add(elm.Dot().at((7, y_cold)))
     d.add(elm.Capacitor().at((7, y_hot)).to((7, y_cold)).label(c_label, loc="bottom", ofst=0.25))
-    d.add(elm.Line().at((7, y_hot)).to((10.2, y_hot)))
-    d.add(elm.Dot(open=True).at((10.2, y_hot)).label(pin_label, loc="right", ofst=0.25))
+    # protection: series resistor after the tuning capacitor, dual clamp diode at the pin
+    d.add(elm.Resistor().at((7, y_hot)).to((9.8, y_hot)).label(r_label, loc="top" if y_hot > 5 else "bottom", ofst=0.2))
+    d.add(elm.Dot().at((9.8, y_hot)))
+    d.add(elm.Diode().at((9.8, y_hot)).to((9.8, y_hot + 1.9)).label(d_label, loc="bottom", ofst=0.2))
+    d.add(elm.Dot(open=True).at((9.8, y_hot + 1.9)).label("3V3", loc="top", ofst=0.15))
+    d.add(elm.Diode().at((9.8, y_hot - 1.9)).to((9.8, y_hot)))
+    d.add(elm.Ground().at((9.8, y_hot - 1.9)))
+    d.add(elm.Line().at((9.8, y_hot)).to((12.6, y_hot)))
+    d.add(elm.Dot(open=True).at((12.6, y_hot)).label(pin_label, loc="right", ofst=0.25))
 
 
 # channel 1: hot on top (y=11), cold y=7;  channel 2: cold on top (y=4), hot at the bottom (y=0)
-channel(11, 7, "ROD 1\n360 µH", "C1\n1.2 nF\n+ 180 pF\nC0G", "A0  (CN9 pin 1)\ne-CzasPL 225 kHz", 11.45)
-channel(0, 4, "ROD 2\n375 µH", "C2\n10 nF\n+ 1.2 nF\nC0G / film", "A1  (CN9 pin 3)\nDCF77 77.5 kHz", -0.55)
+channel(11, 7, "ROD 1\n360 µH", "C1\n1.2 nF\n+ 180 pF\nC0G", "A0  (CN9 pin 1)\ne-CzasPL 225 kHz", 11.45, "R3 330", "D1 BAT54S\n(optional,\nlater)")
+channel(0, 4, "ROD 2\n375 µH", "C2\n10 nF\n+ 1.2 nF\nC0G / film", "A1  (CN9 pin 3)\nDCF77 77.5 kHz", -0.55, "R4 330", "D2 BAT54S\n(optional,\nlater)")
 # cold ends of both channels -> bias node (vertical bus at x = 8.4)
 d.add(elm.Line().at((7, 7)).to((8.4, 7))); d.add(elm.Line().at((7, 4)).to((8.4, 4)))
 d.add(elm.Line().at((8.4, 7)).to((8.4, 4)))
@@ -52,8 +59,8 @@ d.add(elm.Capacitor().at((13.6, 5.5)).to((13.6, 2.3)).label("C3\n1 µF\n(+100 nF
 d.add(elm.Line().at((11.8, 2.3)).to((13.6, 2.3)))
 d.add(elm.Dot().at((12.7, 2.3)))
 d.add(elm.Ground().at((12.7, 2.3)).label("GND (CN8)", loc="right", ofst=0.4))
-box(-2.2, -1.2, 1.3, 12.2, "at the rods")
-box(5.9, -1.2, 16.6, 12.2, "at the NUCLEO board (all parts here)")
+box(-2.2, -2.6, 1.3, 13.6, "at the rods")
+box(5.9, -2.6, 17.4, 13.6, "at the NUCLEO board (all parts here)")
 d.save("/o/sch2.png", dpi=220)
 
 with PdfPages("/o/nucleo_225_77kHz_input.pdf") as pdf:
@@ -69,12 +76,14 @@ with PdfPages("/o/nucleo_225_77kHz_input.pdf") as pdf:
         (f"  C2 = 10 nF + 1.2 nF in parallel (11.2 nF) -> {f0(c2, L2)/1e3:.1f} kHz          (ideal 11.25 nF; 10 nF + 1.5 nF would be {f0(11.5e-9, L2)/1e3:.1f} kHz)", False),
         ("  C1, C2: C0G/NP0 ceramic, polystyrene or polypropylene film (stable, low loss; not X7R)", False),
         ("  R1, R2 = 10 k;  C3 = 1 µF ceramic, optionally + 100 nF, at the board next to R1 / R2", False),
+        ("  Protection per pin: R3, R4 = 330 Ohm in series (fit these now); D1, D2 = BAT54S or BAV99 optional, later", False),
         ("", False),
         ("Connections", True),
         ("  At the rods: nothing but the rod. Each rod -> its own twisted pair -> the board end.", False),
         ("  At the board end: C1 across pair 1, C2 across pair 2 (parallel tuned circuits), R1, R2, C3.", False),
-        ("  Hot end of ROD 1 + C1 -> A0 (CN9 pin 1);   hot end of ROD 2 + C2 -> A1 (CN9 pin 3).", False),
         ("  Cold ends of both rods -> the bias node;  3V3 -> R1 -> bias node -> R2 -> GND;  C3 bias node -> GND.", False),
+        ("  Hot end of C1 -> R3 330 Ohm -> A0 (CN9 pin 1);  hot end of C2 -> R4 330 Ohm -> A1 (CN9 pin 3).", False),
+        ("  Later, if wanted: a dual diode at each pin (middle to the pin, ends to 3V3 and GND).", False),
         ("  Put C1 / C2 right at the pins. The cable capacitance (about 50 pF per metre) adds to C1 / C2.", False),
         ("", False),
         ("Why this is simpler and better", True),
@@ -83,7 +92,9 @@ with PdfPages("/o/nucleo_225_77kHz_input.pdf") as pdf:
         ("  and DC reaches the pin through the rod winding (a few ohms): both pins sit at 1.65 V.", False),
         ("  Old input: the 10k/10k divider (5 k) loaded the tuned rod through 100 nF: Q about 8 instead of about 50,", False),
         ("  about 15 dB less signal at 225 kHz. Now nothing loads it (ADC sampling at 1 Msps is about 200 k).", False),
-        ("  The tuning capacitor at the pin is also the charge reservoir for the ADC's sampling capacitor.", False),
+        ("  C1 / C2 are also the charge reservoir for the ADC's sampling capacitor (a few pF, through 330 Ohm).", False),
+        ("  Protection: C1 / C2 already absorb fast spikes (AC-grounded by C3); 330 Ohm limits the current and the", False),
+        ("  diodes clamp the pin to -0.3...3.6 V (STM32 pins: max 5 mA). Without the diodes, 330 Ohm alone helps.", False),
         ("", False),
         ("Tuning (higher Q = narrower: 225 kHz about +-2 kHz, 77.5 kHz about +-0.8 kHz)", True),
         ("  Rods vary by several %. Tune for the highest C/N0 in the NUCLEO's CARRIER line (every 60 s):", False),
@@ -104,7 +115,7 @@ with PdfPages("/o/nucleo_225_77kHz_input.pdf") as pdf:
     for text, bold in notes:
         fig.text(0.07, y, text, fontsize=9.6 if bold else 8.2, weight="bold" if bold else "normal",
                  color=BLUE if bold else "black")
-        y -= 0.0152
+        y -= 0.0146
     fig.text(0.07, 0.012, "SQ6EMM / e-CzasPL receiver experiments, 28.09.2026", fontsize=7.5, color=GREY)
     pdf.savefig(fig)
 print("ok")
