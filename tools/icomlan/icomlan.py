@@ -284,6 +284,9 @@ class Recorder:
         self.expect = None; self.hold = {}; self.hold_t = {}
         self.lost = self.pkts = self.rtx = 0; self.samples = 0; self.t_first = None
         self.w = None; self.w_end = 0; self.last_len = 0
+        # timing guard: the radio sometimes drops audio without a sequence gap (WLAN congestion);
+        # arrival time vs samples written shows it -> silence is inserted, the file time stays right
+        self.arr = {}; self.t0 = None; self.lags = []; self.inserted = 0
 
     def add(self, seq, pcm, stream):
         self.pkts += 1
@@ -291,7 +294,7 @@ class Recorder:
         if self.expect is None: self.expect = seq
         dist = (seq - self.expect) & 0xffff
         if dist >= 0x8000: return                            # late duplicate
-        self.hold[seq] = pcm; self.hold_t[seq] = time.time()
+        self.hold[seq] = pcm; self.hold_t[seq] = time.time(); self.arr[seq] = time.time()
         if dist > 0:                                         # gap: ask again once
             s = self.expect
             while s != seq:
@@ -306,7 +309,7 @@ class Recorder:
         while self.hold or force:
             if self.expect in self.hold:
                 pcm = self.hold.pop(self.expect); self.hold_t.pop(self.expect, None)
-                self.last_len = len(pcm); self.write(pcm)
+                self.last_len = len(pcm); self.guard(self.arr.pop(self.expect, now)); self.write(pcm)
             elif self.hold and min(t for s, t in self.hold_t.items() if s in self.hold) < now - 0.3:
                 self.hold_t.pop(self.expect, None)
                 self.lost += 1; self.write(bytes(self.last_len))
@@ -314,6 +317,19 @@ class Recorder:
                 break
             self.expect = (self.expect + 1) & 0xffff
             force = False
+
+    def guard(self, t_arr):
+        """insert silence when the samples fall behind the packets' arrival times"""
+        fr = self.bps * self.ch
+        if self.t0 is None: self.t0 = t_arr
+        lag = t_arr - (self.t0 + self.samples / self.a.rate)
+        self.lags.append((t_arr, lag))
+        while self.lags and self.lags[0][0] < t_arr - 30: self.lags.pop(0)
+        base = min(l for _, l in self.lags)
+        if lag - base > 0.1:
+            n = int((lag - base) * self.a.rate)
+            self.write(bytes(n * fr)); self.inserted += n
+            self.lags = [(t, l - n / self.a.rate) for t, l in self.lags]
 
     def write(self, pcm):
         a = self.a
@@ -401,7 +417,7 @@ def main():
             if now >= next_stats:
                 dt = now - st0[0]
                 rate = (rec.samples - st0[1]) / dt
-                log(f"stats: {rec.pkts} packets, lost {rec.lost}, retransmit asked {rec.rtx}, "
+                log(f"stats: {rec.pkts} packets, lost {rec.lost}, retransmit asked {rec.rtx}, silence inserted {rec.inserted / a.rate:.2f} s, "
                     f"{rate:.1f} samples/s over {dt:.0f} s, buffered {len(rec.hold)}")
                 st0 = (now, rec.samples, 0); next_stats = now + a.stats
     except KeyboardInterrupt:
@@ -412,6 +428,8 @@ def main():
 
 
 if __name__ == "__main__":
+    import signal
+    signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt))   # docker stop: close the file
     try:
         main()
     except RuntimeError as e:
