@@ -26,6 +26,7 @@ ap.add_argument("--seeds", type=int, default=3)
 ap.add_argument("--ppm", type=float, default=-1.8)
 ap.add_argument("--variants", nargs="*", default=["base="])
 ap.add_argument("--src", default="/r/firmware")
+ap.add_argument("--pm-min", type=float, default=8.0, help="phase-code sigma threshold (as DCF_PM_MIN)")
 a = ap.parse_args()
 os.makedirs(a.out, exist_ok=True)
 T0 = dt.datetime.strptime(a.start, "%Y-%m-%d %H:%M").replace(tzinfo=dt.timezone.utc).timestamp()
@@ -122,8 +123,8 @@ if __name__ == "__main__":
                  for (n2, c2, s, rows) in res if n2 == nm and c2 == c]
         nok = [r for r in R if r["min_sig"] > 5 and r["minute"] == 59]
         nwr = [r for r in R if r["min_sig"] > 5 and r["minute"] != 59]
-        pok = [r for r in R if r["pm_sig"] > 5 and abs(wrap(r["x"] - x_true)) < 0.5]
-        pwr = [r for r in R if r["pm_sig"] > 5 and abs(wrap(r["x"] - x_true)) >= 0.5]
+        pok = [r for r in R if r["pm_sig"] > a.pm_min and abs(wrap(r["x"] - x_true)) < 0.5]
+        pwr = [r for r in R if r["pm_sig"] > a.pm_min and abs(wrap(r["x"] - x_true)) >= 0.5]
         rms = np.sqrt(np.mean([wrap(r["x"] - x_true) ** 2 for r in pok])) * 1000 if pok else float("nan")
         rep = np.median([r["cn0"] for r in R]) if R else float("nan")
         line = (f"{nm:10s} {c:+6.0f} | {rep:+8.1f} | {len(mok)/nb:7.0%} {len(mwr):5d} {np.nanmedian(first):8.2f} | "

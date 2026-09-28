@@ -23,6 +23,10 @@
 #ifndef DCF_MARK_MIN
 #define DCF_MARK_MIN 6.0f               /* second mark accepted above this many sigma */
 #endif
+#ifndef DCF_PM_MIN
+#define DCF_PM_MIN  8.0f                /* phase-code time used above this many sigma (5-6.5 sigma gave
+                                           0.6-0.8 ms errors on the Kiwi bench, 28 Sep) */
+#endif
 #ifndef DCF_MIN_MIN
 #define DCF_MIN_MIN 5.0f                /* minute accepted above this many sigma */
 #endif
@@ -52,6 +56,8 @@ typedef struct {
     float    pm_sigma;
     int      have_mark, have_minute;
     double   slip;                      /* drift of the DCF77 second through the LSE time scale, samples (fraction kept) */
+    int      pm_ref;                    /* phase-code fold anchor (sample in the LSE second): set from the mark once,
+                                           then moved only by the drift correction, never by mark noise; -1 = unset */
 } dcf_t;
 
 void dcf_init(dcf_t *d);

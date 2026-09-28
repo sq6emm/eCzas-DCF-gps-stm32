@@ -534,7 +534,7 @@ static void dcf_report(void)
 {
     char m[420], b1[16], b2[16], b3[16], b4[16], b5[16], b6[16], cmp[48] = "";
     if (dcf.have_mark && tk.synced) {
-        double start = (double)((n2k - dcf.mark) / 2000 * 2000 + dcf.mark) + (dcf.pm_sigma > 5 ? dcf.pm_lag_ms * 2.0 : 0);
+        double start = (double)((n2k - dcf.mark) / 2000 * 2000 + dcf.mark) + (dcf.pm_sigma > DCF_PM_MIN ? dcf.pm_lag_ms * 2.0 : 0);
         uint32_t sec, us;
         if (tk_time(&tk, (int64_t)(start * (TICKS_PER_BLOCK / 4)), &sec, &us)) {
             double ms = us / 1000.0; if (ms > 500) ms -= 1000;

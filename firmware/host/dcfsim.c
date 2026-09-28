@@ -51,7 +51,7 @@ int main(int argc, char **argv)
             }
             double x = 0;
             if (B != 0 && dcf.have_mark) {
-                double ns = (double)(n - (n % 2000)) + dcf.mark + (dcf.pm_sigma > 5 ? dcf.pm_lag_ms * 2.0 : 0);  /* a DCF77 second start */
+                double ns = (double)(n - (n % 2000)) + dcf.mark + (dcf.pm_sigma > DCF_PM_MIN ? dcf.pm_lag_ms * 2.0 : 0);  /* a DCF77 second start */
                 double t = A + B * ns / 2000.0;
                 x = (t - floor(t + 0.5)) * 1000.0;
             }

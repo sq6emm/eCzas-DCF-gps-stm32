@@ -41,6 +41,7 @@ void dcf_init(dcf_t *d)
     memset(qring, 0, sizeof qring);
     build();
     d->minute_s = -1;
+    d->pm_ref = -1;
     d->amp = 0;
 }
 
@@ -97,9 +98,12 @@ void dcf_push(dcf_t *d, float i, float q, int valid)
             }
             d->sec_y0 = d->sec_y1 = 0; d->sec_k0 = d->sec_k1 = 0;
         }
-        /* phase code: DCF_LAGW samples after a DCF77 second ended, its window is complete */
-        if (p == DCF_LAGW - 1 && d->have_minute && n >= (uint64_t)(WIN + DCF_SPS)) {
-            uint64_t sd = (n - d->mark) / DCF_SPS - 1;   /* the second just completed */
+        /* phase code: DCF_LAGW samples after a DCF77 second ended, its window is complete.
+           The fold is anchored at pm_ref (not at the mark: the mark is quantised to 0.5 ms and
+           steps with the drift correction, which smeared the fold by 0.5-1 ms) */
+        int pr = d->pm_ref >= 0 ? (int)((n + DCF_SPS - d->pm_ref) % DCF_SPS) : -1;
+        if (pr == DCF_LAGW - 1 && d->have_minute && n >= (uint64_t)(WIN + DCF_SPS)) {
+            uint64_t sd = (n - d->pm_ref) / DCF_SPS - 1; /* the second just completed */
             int sm = (int)((sd + 60 - (uint64_t)d->minute_s - 1) % 60), j;
             float sg = sm <= 9 ? -1.0f : sm <= 14 ? 1.0f : 0.0f;
             if (sg != 0) {
@@ -134,6 +138,7 @@ void dcf_block(dcf_t *d, float carrier_hz)
             for (k = 0; k < DCF_SPS; k++) t[(k + sh + DCF_SPS) % DCF_SPS] = d->yr[k];
             memcpy(d->yr, t, sizeof t);
             if (d->have_mark) d->mark = (d->mark + sh + DCF_SPS) % DCF_SPS;
+            if (d->pm_ref >= 0) d->pm_ref = (d->pm_ref + sh + DCF_SPS) % DCF_SPS;
             d->slip -= sh;
         }
     }
@@ -169,7 +174,7 @@ void dcf_block(dcf_t *d, float carrier_hz)
         if (d->have_mark && abs(best - d->mark) > 20 && abs(best - d->mark) < DCF_SPS - 20) {
             memset(d->pmf, 0, sizeof d->pmf); d->pmn = 0;       /* the mark moved: restart the fold */
             memset(d->dip, 0, sizeof d->dip); memset(d->dipn, 0, sizeof d->dipn);
-            d->have_minute = 0;
+            d->have_minute = 0; d->pm_ref = -1;
         }
         d->mark = best; d->have_mark = 1;
     }
@@ -185,6 +190,7 @@ void dcf_block(dcf_t *d, float carrier_hz)
             d->minute_sigma = (med - v[lo]) / sg;
             if (d->minute_sigma > DCF_MIN_MIN) {
                 if (d->have_minute && d->minute_s != lo) { memset(d->pmf, 0, sizeof d->pmf); d->pmn = 0; }
+                if (d->pm_ref < 0) d->pm_ref = d->mark;
                 d->minute_s = lo; d->have_minute = 1;
             }
         }
@@ -209,7 +215,8 @@ void dcf_block(dcf_t *d, float carrier_hz)
                 float y1 = fabsf(cc[kb - 1]), y2 = fabsf(cc[kb]), y3 = fabsf(cc[kb + 1]), den = y1 - 2 * y2 + y3;
                 if (den != 0) fr = 0.5f * (y1 - y3) / den;
             }
-            d->pm_lag_ms = (kb - DCF_LAGW + fr) * 1000.0f / DCF_SPS;
+            int off = ((d->pm_ref - d->mark + DCF_SPS + DCF_SPS / 2) % DCF_SPS) - DCF_SPS / 2;   /* anchor - mark, samples */
+            d->pm_lag_ms = (kb - DCF_LAGW + fr + off) * 1000.0f / DCF_SPS;
         }
         for (k = 0; k < WIN; k++) d->pmf[k] *= DCF_KEEP;
         d->pmn *= DCF_KEEP;
