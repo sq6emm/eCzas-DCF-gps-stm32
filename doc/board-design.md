@@ -1,4 +1,4 @@
-# LF time & frequency receiver board — design draft (v0.3, 28 Sep 2026)
+# LF time & frequency receiver board — design draft (v0.4, 28 Sep 2026)
 
 One board that does what the NUCLEO + rods do today, plus a GPS timing receiver as the truth
 reference and an OCXO steered from e-CzasPL and/or DCF77. Draft for discussion; nothing is
@@ -158,7 +158,7 @@ The e-CzasPL and DCF77 receivers (coh.c, ecz.c, eCzas core, dcf.c, dcfbits.c) st
 | topic | decision | consequence |
 |---|---|---|
 | OCXO | CTI OSC5A2B02, 5 V, many units | section 3.4; hand-soldered (through-hole), not by JLCPCB |
-| GPS | **u-blox LEA-M8T** (the user has one), standard active "mouse" antenna (SMA) | LEA footprint (17 x 22.4 mm, 28-pin castellated), hand-soldered; antenna bias from the module's VCC_RF (~3 V) through a ferrite + current limit; PPS = TIMEPULSE, TIMEPULSE2 to a second capture; UART + UBX (TIM-TP for qErr), V_BCKP from a supercap |
+| GPS | **not on the board** (user: price overkill for daily use; fine as a reference / calibration station). The board gets a 4-pin header (PPS -> timer capture, UART RX/TX, 3.3 V, GND); calibration setup = NUCLEO + the user's LEA-M8T + mouse antenna | daily operation needs no GPS: frequency from the station carrier, time from the e-CzasPL / DCF77 decoders, the absolute second from the DCF77 phase code once the fixed delays are calibrated (with GPS, once / after hardware changes) |
 | Ethernet | **yes** | LAN8742A (RMII) + RJ45 with integrated magnetics; 50 MHz RMII clock from the PHY's own 25 MHz crystal (keeps the OCXO clock tree clean) |
 | power | **12 V DC in** | reverse/over-voltage protection, buck 12 -> 6 V (OCXO warm-up 0.6 A + GPS + digital), then low-noise LDOs: 5.0 V OCXO, 3.3 V digital, 3.3 V analog, VREF for the ADC |
 | CAD | **KiCad** (8.x) | project in `hardware/` of this repo; ERC/DRC and fabrication outputs (Gerber, BOM, CPL) generated in a KiCad container |
