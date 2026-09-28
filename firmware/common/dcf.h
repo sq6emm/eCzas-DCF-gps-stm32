@@ -69,5 +69,9 @@ int  dcf_block_ready(const dcf_t *d);
  * DCF77 tracker in LSE time: it gives the LSE crystal's rate against DCF77 itself, and the
  * fold of past blocks is shifted by the resulting drift of the DCF77 second (no other input). */
 void dcf_block(dcf_t *d, float carrier_hz);
+/* Before the first second marks: look for them in the current block's fold (>= 60 s tracked),
+ * accept above min_sigma. Lets DCF77 be verified within a minute or two instead of at the first
+ * 10-min block. Returns 1 when marks were found (d->mark, mark_sigma, have_mark set). */
+int  dcf_quick_mark(dcf_t *d, float min_sigma);
 
 #endif

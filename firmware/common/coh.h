@@ -78,5 +78,10 @@ void coh_level_hint(coh_trk_t *t, float lvl0_cycles);
 /* The line being tracked is not the wanted carrier (e.g. DCF77: no second marks): never
  * pick it again (+-width) and search anew. */
 void coh_reject(coh_trk_t *t, float width_hz);
+/* Skip the search: pull in at `hz` straight away (the carrier's frequency is already known,
+ * e.g. DCF77 at ~0 Hz when the time base is a disciplined OCXO). */
+void coh_pull_at(coh_trk_t *t, float hz);
+/* Search again (e.g. when a blind pull-in found nothing). */
+void coh_search(coh_trk_t *t);
 
 #endif

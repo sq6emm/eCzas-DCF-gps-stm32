@@ -27,6 +27,9 @@ int main(int argc, char **argv)
     double A = atof(argv[2]), B = atof(argv[3]);
     coh_cfg_t cfg = DCF_COH;
     coh_init(&trk, &cfg); dcf_init(&dcf); dcfbits_init(&bits);
+    /* as the OCXO firmware: DCF_QUICK=1 early second-mark check; DCF_BLIND=hz pull in without a search */
+    int quick = getenv("DCF_QUICK") ? atoi(getenv("DCF_QUICK")) : 0, blind = getenv("DCF_BLIND") != 0;
+    if (blind) coh_pull_at(&trk, (float)atof(getenv("DCF_BLIND")));
     float z[2]; uint64_t n = 0;
     while (fread(z, 4, 2, f) == 2) {
         float dr, di, ir, ii;
@@ -50,6 +53,9 @@ int main(int argc, char **argv)
             fflush(stdout);
         }
         n++;
+        if (quick && !dcf.have_mark && trk.state == COH_TRACK && n % 20000 == 0 && dcf_quick_mark(&dcf, 10.0f))
+            fprintf(stderr, "quick mark at %.0f s\n", n / 2000.0);
+        if (blind && n == 360000 && !dcf.have_mark) coh_search(&trk);
         if (dcf_block_ready(&dcf)) {
             coh_report_t r; coh_report(&trk, &r);
             dcf_block(&dcf, trk.state == COH_TRACK ? (float)trk.hz : 0.0f);

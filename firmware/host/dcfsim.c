@@ -24,6 +24,10 @@ int main(int argc, char **argv)
 #endif
     coh_cfg_t cfg = DCF_COH;
     coh_init(&trk, &cfg); dcf_init(&dcf);
+    /* as the OCXO firmware: DCF_QUICK=1 early second-mark check; DCF_BLIND=hz pull in at hz without
+       a search (search after 180 s without marks) */
+    int quick = getenv("DCF_QUICK") ? atoi(getenv("DCF_QUICK")) : 0, blind = getenv("DCF_BLIND") != 0;
+    if (blind) coh_pull_at(&trk, (float)atof(getenv("DCF_BLIND")));
     /* the chip's DCF77 stream starts at boot: skip to the next whole LSE second */
     float z[2]; unsigned long long n = n0;
     printf("block_end_n  state  f_mHz  cn0  err  | mark_ms sigma | minute(LSE s mod 60) sigma | pm_lag_ms sigma | dcf-eczas_ms\n");
@@ -33,6 +37,9 @@ int main(int argc, char **argv)
         dcf.n = n;                                   /* keep dcf's clock = the chip's sample count */
         dcf_push(&dcf, dr, di, trk.state == COH_TRACK && (z[0] != 0 || z[1] != 0));
         n++;
+        if (quick && !dcf.have_mark && trk.state == COH_TRACK && (n - n0) % 20000 == 0 && dcf_quick_mark(&dcf, 10.0f))
+            printf("# quick mark at %.0f s: %.1f ms, %.1f sigma\n", (n - n0) / 2000.0, dcf.mark / 2.0, dcf.mark_sigma);
+        if (blind && (n - n0) == 360000 && !dcf.have_mark) { printf("# blind pull-in: no marks after 180 s, search\n"); coh_search(&trk); }
         if (dcf_block_ready(&dcf)) {
             coh_report_t r; coh_report(&trk, &r);
             dcf_block(&dcf, trk.state == COH_TRACK ? (float)trk.hz : 0.0f);

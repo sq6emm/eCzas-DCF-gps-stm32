@@ -85,6 +85,16 @@ static void search_done(coh_trk_t *t)
     set_gains(t, t->c.bw_pull);
 }
 
+void coh_pull_at(coh_trk_t *t, float hz)
+{
+    start_search(t);
+    t->hz = hz;
+    t->state = COH_PULL; t->timer = 0; t->unlocked_s = 0;
+    set_gains(t, t->c.bw_pull);
+}
+
+void coh_search(coh_trk_t *t) { start_search(t); }
+
 int coh_push(coh_trk_t *t, float re, float im, float *dr, float *di, float *ir, float *ii)
 {
     double fr;

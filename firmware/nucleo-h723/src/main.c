@@ -528,6 +528,18 @@ static void station_samples(float er, float ei, float dr, float di)
     dcf_push(&dcf, a, b, trk_d.state == COH_TRACK);
     if (dcfbits_push(&dcfb, &dcf, a, b, dcf.n - 1, trk_d.state == COH_TRACK)) dcf_time_report();
     n2k++;
+    /* until the first second marks: look for them every 10 s in the current block (>= 60 s tracked),
+       instead of waiting for the first 10-min block (bench: marks at 120-240 s instead of 600 s) */
+    if (!dcf.have_mark && trk_d.state == COH_TRACK && n2k % 20000 == 0 && dcf_quick_mark(&dcf, 10.0f)) {
+        char m[100], b1[16], b2[16];
+        dcf_line_hz = (float)trk_d.hz; dcf_blocks_locked = 1; dcf_line_proven = 1;
+        snprintf(m, sizeof m, "second marks found early: %s ms of the second, %s sigma", f1(b1, dcf.mark / 2.0, 0), f1(b2, dcf.mark_sigma, 0));
+        put_line("DCF77", m);
+    }
+#ifdef OCXO_REF
+    /* the blind pull-in at 0 Hz (see main) found nothing within 3 min: search the normal way */
+    if (n2k == 360000 && !dcf.have_mark && trk_d.state != COH_SEARCH) { coh_search(&trk_d); put_line("DCF77", "no second marks 3 min after the blind pull-in - searching"); }
+#endif
     if (dcf_block_ready(&dcf)) {
         dcf_block(&dcf, trk_d.state == COH_TRACK ? (float)trk_d.hz : 0.0f);
         /* carrier check: a DCF77 carrier has second marks; none in the first 60 min on a
@@ -686,6 +698,11 @@ int main(void)
         static const coh_cfg_t ce = { COH_ECZAS, 4, 3.0f, 1.0f, 1500, 4, 1024, 40.0f, 25.0f, 30.0f };
         static const coh_cfg_t cd = { COH_PLAIN, 20000, 0.03f, 0.01f, 6, 500, 512, 2.0f, 40.0f, 600.0f };
         coh_init(&trk_e, &ce); coh_init(&trk_d, &cd);
+#ifdef OCXO_REF
+        /* the OCXO is steered to the carriers (EFC_INIT = where it was locked): DCF77 is within a
+           few mHz of 0 Hz, so pull in there at once instead of a 128-s search (fallback: above) */
+        coh_pull_at(&trk_d, 0.0f);
+#endif
     }
     ecz_init(&ez);
     dcf_init(&dcf); dcfbits_init(&dcfb);

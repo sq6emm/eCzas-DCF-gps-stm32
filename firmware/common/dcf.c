@@ -116,36 +116,14 @@ void dcf_push(dcf_t *d, float i, float q, int valid)
     }
 }
 
-int dcf_block_ready(const dcf_t *d)
-{
-    return d->n > 0 && d->n % ((uint64_t)DCF_SPS * DCF_BLOCK_S) == 0;
-}
-
-void dcf_block(dcf_t *d, float carrier_hz)
+/* second mark in a fold normalised by the carrier amplitude: sample index of the best match with
+   the 100 (+100) ms reduction, and its significance */
+static int mark_find(const float *yr, float *sigma)
 {
     static float sc[DCF_SPS];
     static float y2[2 * DCF_SPS];                   /* yr twice: no modulo in the inner loops */
     float med, sg; int m, k, best;
-    /* second mark (running) */
-    /* the DCF77 second lasts (1 - carrier_hz/77500) * 2000 LSE samples: over one block its start
-     * moves by -carrier_hz/77500 * block samples through the LSE second; shift the running
-     * fold (and the mark) by the whole samples of that drift, keep the fraction */
-    d->slip += -(double)carrier_hz / 77500.0 * (double)DCF_SPS * DCF_BLOCK_S;
-    {
-        int sh = (int)floor(d->slip + 0.5);
-        if (sh > 50 || sh < -50) sh = 0, d->slip = 0;          /* implausible: ignore */
-        if (sh != 0) {
-            static float t[DCF_SPS];
-            for (k = 0; k < DCF_SPS; k++) t[(k + sh + DCF_SPS) % DCF_SPS] = d->yr[k];
-            memcpy(d->yr, t, sizeof t);
-            if (d->have_mark) d->mark = (d->mark + sh + DCF_SPS) % DCF_SPS;
-            if (d->pm_ref >= 0) d->pm_ref = (d->pm_ref + sh + DCF_SPS) % DCF_SPS;
-            d->slip -= sh;
-        }
-    }
-    if (d->nsec > 0 && d->amp > 0)
-        for (k = 0; k < DCF_SPS; k++) d->yr[k] = DCF_KEEP * d->yr[k] + d->yf[k] / (d->nsec * d->amp);
-    memcpy(y2, d->yr, sizeof d->yr); memcpy(y2 + DCF_SPS, d->yr, sizeof d->yr);
+    memcpy(y2, yr, DCF_SPS * sizeof *yr); memcpy(y2 + DCF_SPS, yr, DCF_SPS * sizeof *yr);
     /* coarse (every 4th offset, 2 ms), then all offsets within +-2 ms of the best:
      * ~1.1 M multiply-adds instead of 4 M, keeps the 10-min evaluation to a few ms */
     for (m = 0; m < DCF_SPS; m += 4) {
@@ -169,8 +147,51 @@ void dcf_block(dcf_t *d, float carrier_hz)
     {
         float s = 0; const float *y = y2 + best;
         for (k = 0; k < DCF_SPS; k++) s += y[k] * T[k];
-        d->mark_sigma = (s - med) / sg;
+        *sigma = (s - med) / sg;
     }
+    return best;
+}
+
+int dcf_quick_mark(dcf_t *d, float min_sigma)
+{
+    static float t[DCF_SPS];
+    float s; int k, best;
+    if (d->have_mark || d->nsec < 60 || d->amp <= 0) return 0;
+    for (k = 0; k < DCF_SPS; k++) t[k] = d->yf[k] / (d->nsec * d->amp);
+    best = mark_find(t, &s);
+    if (s < min_sigma) return 0;
+    d->mark = best; d->mark_sigma = s; d->have_mark = 1;
+    return 1;
+}
+
+int dcf_block_ready(const dcf_t *d)
+{
+    return d->n > 0 && d->n % ((uint64_t)DCF_SPS * DCF_BLOCK_S) == 0;
+}
+
+void dcf_block(dcf_t *d, float carrier_hz)
+{
+    float med, sg; int k, best;
+    /* second mark (running) */
+    /* the DCF77 second lasts (1 - carrier_hz/77500) * 2000 LSE samples: over one block its start
+     * moves by -carrier_hz/77500 * block samples through the LSE second; shift the running
+     * fold (and the mark) by the whole samples of that drift, keep the fraction */
+    d->slip += -(double)carrier_hz / 77500.0 * (double)DCF_SPS * DCF_BLOCK_S;
+    {
+        int sh = (int)floor(d->slip + 0.5);
+        if (sh > 50 || sh < -50) sh = 0, d->slip = 0;          /* implausible: ignore */
+        if (sh != 0) {
+            static float t[DCF_SPS];
+            for (k = 0; k < DCF_SPS; k++) t[(k + sh + DCF_SPS) % DCF_SPS] = d->yr[k];
+            memcpy(d->yr, t, sizeof t);
+            if (d->have_mark) d->mark = (d->mark + sh + DCF_SPS) % DCF_SPS;
+            if (d->pm_ref >= 0) d->pm_ref = (d->pm_ref + sh + DCF_SPS) % DCF_SPS;
+            d->slip -= sh;
+        }
+    }
+    if (d->nsec > 0 && d->amp > 0)
+        for (k = 0; k < DCF_SPS; k++) d->yr[k] = DCF_KEEP * d->yr[k] + d->yf[k] / (d->nsec * d->amp);
+    best = mark_find(d->yr, &d->mark_sigma);
     if (d->mark_sigma > DCF_MARK_MIN) {
         if (d->have_mark && abs(best - d->mark) > 20 && abs(best - d->mark) < DCF_SPS - 20) {
             memset(d->pmf, 0, sizeof d->pmf); d->pmn = 0;       /* the mark moved: restart the fold */
