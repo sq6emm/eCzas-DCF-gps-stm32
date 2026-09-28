@@ -806,7 +806,12 @@ int main(void)
 #ifdef OCXO_REF
             {   /* steer the OCXO from both carriers (common/efc.c): DCF77 = accuracy, e-CzasPL with
                    its learned offset removed, weighted by the measured noise */
-                int vd = rd2.state == COH_TRACK && dcf_verified(), ve = re.state == COH_TRACK && re.err_deg < 25;
+                /* a station counts only after 2 whole minutes locked: the first minute after (re)lock still
+                   holds the pull-in (e-CzasPL +30 ppb after the 20:28 reboot moved the OCXO by 1.8 us) */
+                static int nd, ne;
+                nd = (rd2.state == COH_TRACK && dcf_verified()) ? nd + 1 : 0;
+                ne = (re.state == COH_TRACK && re.err_deg < 25) ? ne + 1 : 0;
+                int vd = nd > 2, ve = ne > 2;
                 int src = efc_minute2(&efc, vd, rd2.freq_hz / F_DCF, ve, re.freq_hz / F_CARRIER, 60.0);
                 static const char *SRC[] = { "none", "DCF77", "e-CzasPL", "DCF77+e-CzasPL" };
                 char b9[16], b10[16];
