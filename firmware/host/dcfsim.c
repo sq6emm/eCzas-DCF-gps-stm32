@@ -19,7 +19,10 @@ int main(int argc, char **argv)
     FILE *f = fopen(argv[1], "rb"); if (!f) return 2;
     unsigned long long n0 = strtoull(argv[2], 0, 10);
     double A = argc > 4 ? atof(argv[3]) : 0, B = argc > 4 ? atof(argv[4]) : 0;
-    coh_cfg_t cfg = { COH_PLAIN, 20000, 0.03f, 0.01f, 6, 500, 512, 2.0f, 40.0f, 600.0f };
+#ifndef DCF_COH
+#define DCF_COH { COH_PLAIN, 20000, 0.03f, 0.01f, 6, 500, 512, 2.0f, 40.0f, 600.0f }   /* as main.c */
+#endif
+    coh_cfg_t cfg = DCF_COH;
     coh_init(&trk, &cfg); dcf_init(&dcf);
     /* the chip's DCF77 stream starts at boot: skip to the next whole LSE second */
     float z[2]; unsigned long long n = n0;

@@ -17,7 +17,15 @@
 
 #define DCF_SPS     2000                /* samples per second */
 #define DCF_BLOCK_S 600                 /* report period [s] */
+#ifndef DCF_KEEP                        /* (overridable for the host tuning bench) */
 #define DCF_KEEP    0.85f               /* weight of the previous blocks in the running sums */
+#endif
+#ifndef DCF_MARK_MIN
+#define DCF_MARK_MIN 6.0f               /* second mark accepted above this many sigma */
+#endif
+#ifndef DCF_MIN_MIN
+#define DCF_MIN_MIN 5.0f                /* minute accepted above this many sigma */
+#endif
 #define DCF_LAGW    120                 /* phase-code search +-60 ms around the second mark */
 
 typedef struct {

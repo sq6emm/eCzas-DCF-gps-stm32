@@ -1,0 +1,4 @@
+# host test bench: gcc + numpy/scipy (dcfbench.py, cohsim/dcfsim variants)
+FROM gcc:14
+RUN apt-get update -qq && apt-get install -y -qq python3-numpy python3-scipy >/dev/null && rm -rf /var/lib/apt/lists/*
+LABEL owner=claude

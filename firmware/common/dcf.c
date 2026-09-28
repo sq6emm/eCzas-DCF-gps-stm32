@@ -165,7 +165,7 @@ void dcf_block(dcf_t *d, float carrier_hz)
         for (k = 0; k < DCF_SPS; k++) s += y[k] * T[k];
         d->mark_sigma = (s - med) / sg;
     }
-    if (d->mark_sigma > 6) {
+    if (d->mark_sigma > DCF_MARK_MIN) {
         if (d->have_mark && abs(best - d->mark) > 20 && abs(best - d->mark) < DCF_SPS - 20) {
             memset(d->pmf, 0, sizeof d->pmf); d->pmn = 0;       /* the mark moved: restart the fold */
             memset(d->dip, 0, sizeof d->dip); memset(d->dipn, 0, sizeof d->dipn);
@@ -183,7 +183,7 @@ void dcf_block(dcf_t *d, float carrier_hz)
             for (c = 1; c < 60; c++) if (v[c] < v[lo]) lo = c;
             sg = robust_sigma(v, 60, lo, lo, &med);
             d->minute_sigma = (med - v[lo]) / sg;
-            if (d->minute_sigma > 5) {
+            if (d->minute_sigma > DCF_MIN_MIN) {
                 if (d->have_minute && d->minute_s != lo) { memset(d->pmf, 0, sizeof d->pmf); d->pmn = 0; }
                 d->minute_s = lo; d->have_minute = 1;
             }
