@@ -25,7 +25,8 @@ LOG, OUT = sys.argv[1], sys.argv[2]
 os.makedirs(OUT, exist_ok=True)
 CSV = os.path.join(OUT, "cmp.csv")
 PAT = re.compile(r"^(\S+?)\+00:00 \[\s*([\d.]+)\] CARRIER eCzas [-+\d.]+ mHz C/N0 [-\d.]+ dB-Hz noise [\d.]+ deg "
-                 r"phase ([-\d.]+) cyc (\w[\w ]*?) \| DCF77 [-+\d.]+ mHz C/N0 [-\d.]+ dB-Hz phase ([-\d.]+) cyc ([^|]+?) \|")
+                 r"phase ([-+\d.]+) cyc (\w[\w ]*?) \| DCF77 [-+\d.]+ mHz C/N0 [-\d.]+ dB-Hz phase ([-+\d.]+) cyc ([^|]+?) \|")
+# (the phases carry an explicit sign; '+' was missing here until 29 Sep 13:50 - positive phases were skipped)
 
 
 def printable(b):
