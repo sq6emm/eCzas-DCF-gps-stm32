@@ -412,7 +412,9 @@ static double f_mix;
 static float mix_c = 1, mix_s = 0, rot_c, rot_s;
 /* second channel: DCF77 at 77.5 kHz, same phase-locked true time, streamed as
    2 kHz complex baseband (AUDIO_DUMP builds) for analysis on the host */
-#define F_DCF 77500.0
+#ifndef F_DCF
+#define F_DCF 77500.0                      /* second mixer; -DF_DCF=162000.0 probes TDF (ALS162) */
+#endif
 static float mx2_c = 1, mx2_s = 0, rt2_c = 1, rt2_s = 0, acc2_r, acc2_i;
 static double pl_cyc2;
 static void set_mix(double f)

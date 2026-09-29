@@ -94,7 +94,10 @@ def decode_minutes(bits, conf, marks, t_of, label, verbose):
         utc = dt.datetime.fromtimestamp(round(t_of[i0 + 1] / 60) * 60 + 60, dt.timezone.utc)
         loc = utc + dt.timedelta(hours=2 if b[17] else 1)
         right = (mi, hr, dy, mo, yr) == (loc.minute, loc.hour, loc.day, loc.month, loc.year % 100)
-        t_code = (dt.datetime(2000 + yr, mo, dy, hr, mi, tzinfo=dt.timezone.utc) - dt.timedelta(hours=2 if b[17] else 1)).timestamp() if valid else None
+        try:
+            t_code = (dt.datetime(2000 + yr, mo, dy, hr, mi, tzinfo=dt.timezone.utc) - dt.timedelta(hours=2 if b[17] else 1)).timestamp() if valid else None
+        except ValueError:                        # e.g. 31 September: not a date
+            valid = False; t_code = None
         out.append((utc.timestamp(), t_code, right))
         if not valid: res["failed"] += 1; st = "failed"
         elif right: res["ok"] += 1; res["repaired"] += flips > 0; st = "CORRECT" + (f" ({flips} repaired)" if flips else "")
