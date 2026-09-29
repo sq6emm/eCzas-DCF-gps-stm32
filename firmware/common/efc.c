@@ -27,6 +27,10 @@
 #define EFC_DISAGREE 10e-9
 #endif
 #define EFC_NOISE_N  60.0          /* noise estimates: 1 h average */
+#ifndef EFC_WE_MAX
+#define EFC_WE_MAX   1.0           /* cap on e-CzasPL's weight while DCF77 is there (0 = lock to DCF77 only;
+                                      e-CzasPL's offset is still learned and it steers alone when DCF77 is lost) */
+#endif
 #define EFC_MAX 4095.0
 
 static double clampc(double c) { return c < 0 ? 0 : c > EFC_MAX ? EFC_MAX : c; }
@@ -62,6 +66,7 @@ int efc_minute2(efc_t *f, int vd, double yd, int ve, double ye, double T)
             f->bias += (r - f->bias) * T / EFC_BIAS_TAU;
             double wd = 1 / f->vd, we = 1 / f->ve;
             f->we = we / (wd + we);
+            if (f->we > EFC_WE_MAX) f->we = EFC_WE_MAX;
             y = f->we * (ye - f->bias) + (1 - f->we) * yd;
             src = EFC_SRC_BOTH;
         }
