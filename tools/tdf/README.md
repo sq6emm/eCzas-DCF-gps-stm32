@@ -17,5 +17,30 @@ giving the NEXT minute in French legal time.
 | `tdf_decode3.py` | per-second complex least-squares fit u = g exp(jT) with learned shapes (bit 0 / bit 1 / none), second start by a matched filter with the learned burst, minute marker folded over all minutes, parity repair + BCD range checks, confirmation by a neighbouring minute; `--cn0` adds calibrated noise |
 | `sub_schedule.sh` | IC-7610 SUB test schedule (TDF / MSF / RBU / back to DCF77) |
 
-Bench, 28 Sep 22:40-22:50 (learn on 22:34-22:40, test on the next file, noise added):
+Python bench, 28 Sep 22:40-22:50 (learn on 22:34-22:40, test on the next file, noise added):
 confirmed minutes of 9: 9 (49 dB-Hz), 8 (25), 8 (22), 4 (20), 0 (<= 18); WRONG confirmed 0 at every level.
+CORRECTION (29 Sep): the Python bench added real noise with half the intended power, so its C/N0
+labels are ~3 dB optimistic (its '20 dB-Hz' is really ~23 dB-Hz). The C bench below adds complex noise
+correctly.
+
+## C decoder (firmware/common/tdf.c, host/tdfsim.c, tools/tdfbench.py)
+
+The same method as streaming C for the NUCLEO (behind a 162 kHz mixer and the carrier tracker, like
+DCF77): fixed shapes (tdf_shape.h, learned on 22:34-22:40), second start by a folded matched filter,
+per-second complex fit, minute marker folded over minutes, parity repair, BCD/range/date checks,
+confirmation by the next minute, and confirmation by the expected frame (score >= 30 and >= 15 ahead of
+the frames +-1/+-2 min). Without a confirmed reference, an unconfirmed decode without parity repair can
+become one only if the next minute agrees with its prediction on nearly all confident bits (>= 0.8 of
+sum |LLR|) - a looser test let wrong hours/dates through at 20-22 dB-Hz.
+Input: tools/tdf/tdf_c64.py makes 2 kHz complex files from the IC-7610 recordings.
+
+Bench, 22:40-23:26 (46 min), complex noise, 3 seeds per level:
+
+| C/N0 | confirmed (standalone + expected frame) | WRONG confirmed |
+|---|---|---|
+| 49 (clean) | 42 + 0 of 43 | 0 |
+| 30 dB-Hz | 98 % | 0 |
+| 25 dB-Hz | 96 % | 0 |
+| 22 dB-Hz | 46 % | 0 |
+| <= 20 dB-Hz | 0 % | 0 |
+
