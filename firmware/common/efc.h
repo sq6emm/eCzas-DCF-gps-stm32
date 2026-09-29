@@ -9,7 +9,11 @@
  *    (EFC_BIAS_TAU, while both are locked) and removed from e-CzasPL;
  *  - the two are then weighted by their measured minute-to-minute noise (inverse variance), so
  *    the quieter station dominates the short term while DCF77 fixes the long term;
- *  - a minute where they disagree by more than EFC_DISAGREE uses DCF77 alone;
+ *  - a minute where they disagree by more than EFC_DISAGREE: in LOCK the station further from what
+ *    DCF77 alone, unless (in LOCK) DCF77 is more than EFC_DBAD_BIG off and further from what the loop
+ *    expects (y ~ 0) than e-CzasPL: then e-CzasPL (offset removed) steers for EFC_DBAD_HOLD minutes
+ *    (29 Sep 20:10-20:40: DCF77 at 2..-14 dB-Hz still 'locked', +30..+50 ppb for minutes). Smaller
+ *    disagreements stay with DCF77: its white night noise averages out, a wrong e-CzasPL offset not;
  *  - one station lost: the other alone (e-CzasPL with the learned offset); none: holdover.
  *
  * Input once a minute: the station's mean frequency against the OCXO time base, as a fraction
@@ -42,6 +46,7 @@ typedef struct {
     double vd, ve, pyd, pye; int hd, he;   /* minute-to-minute noise variances, previous values */
     double we;                     /* weight of e-CzasPL in the last combined minute */
     double veff, tau;              /* noise variance of the steering measurement, loop time constant in use */
+    int    dbad;                   /* minutes left in which DCF77 is not trusted (it was the wrong one) */
 } efc_t;
 
 /* slope 0: calibrate first; otherwise the known slope [fraction per code] -> straight to LOCK */

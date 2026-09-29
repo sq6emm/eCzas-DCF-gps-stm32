@@ -43,6 +43,12 @@
 #define EFC_WE_MAX   0.0           /* cap on e-CzasPL's weight while DCF77 is there (0 = lock to DCF77 only;
                                       e-CzasPL's offset is still learned and it steers alone when DCF77 is lost) */
 #endif
+#ifndef EFC_DBAD_HOLD
+#define EFC_DBAD_HOLD 15          /* minutes e-CzasPL steers after DCF77 was grossly wrong */
+#endif
+#ifndef EFC_DBAD_BIG
+#define EFC_DBAD_BIG  20e-9       /* ... i.e. this far off (white night noise stays below: efcsim) */
+#endif
 #define EFC_MAX 4095.0
 
 static double clampc(double c) { return c < 0 ? 0 : c > EFC_MAX ? EFC_MAX : c; }
@@ -55,6 +61,7 @@ void efc_init(efc_t *f, double code, double slope)
     f->y0 = f->y1 = f->ysum = f->yprev = f->x = f->integ = f->y = 0;
     f->bias = f->bsum = 0; f->bn = 0;
     f->vd = f->ve = 2e-18; f->pyd = f->pye = 0; f->hd = f->he = 0; f->we = 0; f->veff = 0; f->tau = EFC_TAU;
+    f->dbad = 0;
     if (slope != 0) { f->slope = slope; f->state = EFC_LOCK; f->skip = 0; }
 }
 
@@ -67,14 +74,20 @@ int efc_minute2(efc_t *f, int vd, double yd, int ve, double ye, double T)
     f->veff = vd ? f->vd : f->ve;                     /* noise of what steers (DCF77 alone / e-CzasPL alone) */
     int src = EFC_SRC_NONE; double y = 0;
     f->we = 0;
+    if (f->dbad > 0) f->dbad--;
     if (vd && ve) {
         double r = ye - yd;
         if (f->bn < EFC_BIAS_INIT) {                  /* learning the offset first: DCF77 alone */
             f->bsum += r;
             if (++f->bn == EFC_BIAS_INIT) f->bias = f->bsum / EFC_BIAS_INIT;
             src = EFC_SRC_DCF77; y = yd;
-        } else if (fabs(r - f->bias) > EFC_DISAGREE) {
-            src = EFC_SRC_DCF77; y = yd;              /* one of them is wrong this minute */
+        } else if (fabs(r - f->bias) > EFC_DISAGREE) {    /* one of them is wrong this minute */
+            if (f->state == EFC_LOCK && fabs(yd) > EFC_DBAD_BIG && fabs(yd) > fabs(ye - f->bias))
+                f->dbad = EFC_DBAD_HOLD;              /* DCF77 grossly off, further from y ~ 0 than e-CzasPL */
+            if (f->dbad) { src = EFC_SRC_ECZAS; y = ye - f->bias; f->we = 1; f->veff = f->ve; }
+            else { src = EFC_SRC_DCF77; y = yd; }
+        } else if (f->dbad) {                         /* DCF77 was wrong recently: e-CzasPL steers */
+            src = EFC_SRC_ECZAS; y = ye - f->bias; f->we = 1; f->veff = f->ve;
         } else {
             if (f->vd < EFC_BIAS_VMAX) f->bias += (r - f->bias) * T / EFC_BIAS_TAU;
             double wd = 1 / f->vd, we = 1 / f->ve;
