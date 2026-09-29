@@ -623,6 +623,41 @@ static void process_block(const uint32_t *b, float mean, float mean2)
 /* ticks (FCY_HZ units of the eCzas core) of true time: 2 kHz sample n = n * 20000 */
 static int64_t now_tick(void) { return (int64_t)n2k * (TICKS_PER_BLOCK / 4); }
 
+/* hourly statistics (STATS line): the guaranteed e-CzasPL time frame of each minute (sent in slot 1 =
+   second 03 - measured 29 Sep 2026; the frame description says slot 0), all time frames, early
+   frames, DCF77 minutes, signal levels. Slots are attributed with the NUCLEO's own clock. */
+static struct {
+    uint32_t hour;                         /* UTC hour index (s / 3600) being counted, 0 = none */
+    uint8_t  g[60], exp_[60];              /* per minute: guaranteed frame 0 none 1 heard 2 confirmed 3 correct; expected */
+    uint32_t all_ok, all_conf, heard, early;
+    unsigned long dcf0[4];                 /* dcfbits counters at the start of the hour */
+    double   cn_e, cn_d; int ncn;
+} hs;
+static void hs_mark(uint32_t n3, uint8_t st)
+{
+    uint32_t sec = 3UL * n3;
+    if (hs.hour == 0 || sec / 3600 != hs.hour) return;
+    if (sec % 60 == 3) { uint8_t *g = &hs.g[(sec % 3600) / 60]; if (st > *g) *g = st; }
+}
+static void hs_start(uint32_t hour)
+{
+    memset(&hs, 0, sizeof hs); hs.hour = hour;
+    hs.dcf0[0] = dcfb.n_confirmed; hs.dcf0[1] = dcfb.n_predicted; hs.dcf0[2] = dcfb.n_decoded; hs.dcf0[3] = dcfb.n_failed;
+}
+static void hs_report(void)
+{
+    char m[400], b1[16], b2[16];
+    int e = 0, h = 0, c = 0, k = 0, i;
+    for (i = 0; i < 60; i++) if (hs.exp_[i]) { e++; h += hs.g[i] >= 1; k += hs.g[i] == 2; c += hs.g[i] == 3; }
+    unsigned long dc = dcfb.n_confirmed - hs.dcf0[0], dp = dcfb.n_predicted - hs.dcf0[1], dd = dcfb.n_decoded - hs.dcf0[2], df = dcfb.n_failed - hs.dcf0[3];
+    snprintf(m, sizeof m, "%02lu UTC | e-CzasPL time frame at :03 (guaranteed): expected %d, heard %d, correct %d, confirmed %d | all time frames: correct %lu, confirmed %lu, "
+             "heard %lu, early %lu | DCF77 minutes: confirmed %lu, by expected frame %lu, unconfirmed %lu, not decodable %lu | C/N0 e-CzasPL %s, DCF77 %s dB-Hz",
+             (unsigned long)(hs.hour % 24), e, h, c, k, (unsigned long)hs.all_ok, (unsigned long)hs.all_conf, (unsigned long)hs.heard, (unsigned long)hs.early,
+             dc, dp, dd > dc + dp ? dd - dc - dp : 0UL, df,
+             hs.ncn ? f1(b1, hs.cn_e / hs.ncn, 0) : "-", hs.ncn ? f1(b2, hs.cn_d / hs.ncn, 0) : "-");
+    put_line("STATS", m);
+}
+
 static void handle_candidate(void)
 {
     dsp_cand_t *c = &ez.cand;
@@ -632,7 +667,11 @@ static void handle_candidate(void)
     memset(&fi, 0, sizeof fi);
     frame_status_t st = frame_decode(c->ph + CAND_PRE, &fi);
     if (st == FR_NOT_TIME) { ez.cand_ready = 0; return; }
-    n_heard++;
+    n_heard++; hs.heard++;
+    {
+        uint32_t n3h;
+        if (tk.synced && tk_expected_n3(&tk, tick, &n3h)) hs_mark(n3h, 1);
+    }
     if (st == FR_UNCORRECTABLE && have_last_fi) {
         uint32_t n3p;
         if (tk_expected_n3(&tk, tick, &n3p)) {
@@ -645,6 +684,7 @@ static void handle_candidate(void)
                 frame_info_t fe = last_fi; fe.n3 = n3p;
                 tk_result_t r = tk_frame(&tk, tick + (int64_t)tq * TICKS_PER_BLOCK / 32768, &fe);
                 n_conf++;
+                if (r == TK_ACCEPTED) { hs.all_conf++; hs_mark(n3p, 2); }
                 date_str(d1, 3UL * n3p, fe.tz);
                 snprintf(m, sizeof m, "#%lu not decodable, but %d%% agrees with the expected frame: %s%s",
                          (unsigned long)n_heard, sc * 100 / 1024, d1, r == TK_ACCEPTED ? " - confirmed" : "");
@@ -679,6 +719,8 @@ static void handle_candidate(void)
     default: n_rej++; snprintf(m, sizeof m, "REJECTED - differs from clock by %ld ms", (long)off_ms); break;
     }
     put_line("CLOCK", m);
+    if (r == TK_ACCEPTED || r == TK_SYNCED) { hs.all_ok++; hs_mark(fi.n3, 3); }
+    else if (r != TK_STEPPED && r != TK_CANDIDATE && off_ms > -2700 && off_ms < -2300) hs.early++;
     if (r == TK_ACCEPTED || r == TK_SYNCED || r == TK_STEPPED) { last_fi = fi; have_last_fi = 1; }
     ez.cand_ready = 0;
 }
@@ -687,16 +729,18 @@ static void handle_candidate(void)
    fed back - where its second starts relative to the e-CzasPL second */
 static void dcf_report(void)
 {
-    char m[420], b1[16], b2[16], b3[16], b4[16], b5[16], b6[16], cmp[48] = "";
+    char m[420], b1[16], b2[16], b3[16], b4[16], b5[16], b6[16], b7[16], cmp[120] = "";
     if (dcf.have_mark && tk.synced) {
         double start = (double)((n2k - dcf.mark) / 2000 * 2000 + dcf.mark) + (dcf.pm_sigma > DCF_PM_MIN ? dcf.pm_lag_ms * 2.0 : 0);
         uint32_t sec, us;
         if (tk_time(&tk, (int64_t)(start * (TICKS_PER_BLOCK / 4)), &sec, &us)) {
             double ms = us / 1000.0; if (ms > 500) ms -= 1000;
-            snprintf(cmp, sizeof cmp, " | vs e-CzasPL second %s ms", f1(b5, ms, 1));
+            /* at the transmitters: minus the ground-wave delays from Wroclaw (Mainflingen 580 km 1.93 ms,
+               Solec Kujawski 234 km 0.78 ms); what remains are the transmitters' and receivers' own offsets */
+            snprintf(cmp, sizeof cmp, " | vs e-CzasPL second %s ms (at the transmitters %s ms)", f1(b5, ms, 1), f1(b7, ms - (1.93 - 0.78), 1));
         }
     }
-    snprintf(m, sizeof m, "carrier %s, second mark %s ms of the LSE second (%s sigma), minute %s (%s sigma), phase code %s ms (%s sigma)%s",
+    snprintf(m, sizeof m, "carrier %s, second mark %s ms of the " REF_NAME " second (%s sigma), minute %s (%s sigma), phase code %s ms (%s sigma)%s",
              dcf_state_txt(),
              dcf.have_mark ? f1(b1, dcf.mark / 2.0, 0) : "-", f1(b2, dcf.mark_sigma, 0),
              dcf.have_minute ? "found" : "not yet", f1(b3, dcf.minute_sigma, 0),
@@ -821,6 +865,13 @@ int main(void)
             next_s += 2000;
             blk_ratio_sum = 0; blk_ratio_n = 0;
             tk_maintain(&tk, now_tick());
+            {   /* hourly statistics: expected minutes, hour change */
+                uint32_t sec;
+                if (tk.synced && tk_time(&tk, now_tick(), &sec, 0)) {
+                    if (hs.hour != sec / 3600) { if (hs.hour) hs_report(); hs_start(sec / 3600); }
+                    if (sec % 60 >= 3) hs.exp_[(sec % 3600) / 60] = 1;
+                }
+            }
 #ifdef OCXO_REF
             /* LD3 red: on = OCXO locked, blinking = calibrating / moving / holdover, off = waiting or failed */
             if (efc.state == EFC_LOCK && !efc.skip && efc.src != EFC_SRC_NONE) HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_SET);
@@ -842,6 +893,7 @@ int main(void)
                      dcf_state_txt(),
                      (re.state == COH_TRACK && dcf_verified()) ? f1(b6, ppb, 1) : "-");
             put_line("CARRIER", m);
+            if (hs.hour) { hs.cn_e += re.cn0_dbhz; hs.cn_d += rd2.cn0_dbhz; hs.ncn++; }
 #ifdef OCXO_REF
             {   /* steer the OCXO from both carriers (common/efc.c): DCF77 = accuracy, e-CzasPL with
                    its learned offset removed, weighted by the measured noise */
