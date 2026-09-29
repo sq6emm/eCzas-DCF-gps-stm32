@@ -27,8 +27,20 @@
 #define EFC_DISAGREE 10e-9
 #endif
 #define EFC_NOISE_N  60.0          /* noise estimates: 1 h average */
+#ifndef EFC_TAU_MAXF
+#define EFC_TAU_MAXF 6.0           /* adaptive loop: tau = EFC_TAU x sqrt(noise / EFC_VREF), at most this
+                                      many times EFC_TAU (1 = fixed tau). efcsim night: 332 -> 98 ns */
+#endif
+#ifndef EFC_VREF
+#define EFC_VREF     1.7e-18       /* (1.3 ppb)^2: DCF77's minute noise on the rod by day */
+#endif
+#ifndef EFC_BIAS_VMAX
+#define EFC_BIAS_VMAX 4e-18        /* learn e-CzasPL's offset only while DCF77's minute noise is below
+                                      2 ppb (daytime ground wave); frozen when DCF77 is noisy (night):
+                                      a noisy reference leaks into the offset and the OCXO integrates it */
+#endif
 #ifndef EFC_WE_MAX
-#define EFC_WE_MAX   1.0           /* cap on e-CzasPL's weight while DCF77 is there (0 = lock to DCF77 only;
+#define EFC_WE_MAX   0.0           /* cap on e-CzasPL's weight while DCF77 is there (0 = lock to DCF77 only;
                                       e-CzasPL's offset is still learned and it steers alone when DCF77 is lost) */
 #endif
 #define EFC_MAX 4095.0
@@ -42,7 +54,7 @@ void efc_init(efc_t *f, double code, double slope)
     f->slope = EFC_SLOPE_NOM;
     f->y0 = f->y1 = f->ysum = f->yprev = f->x = f->integ = f->y = 0;
     f->bias = f->bsum = 0; f->bn = 0;
-    f->vd = f->ve = 2e-18; f->pyd = f->pye = 0; f->hd = f->he = 0; f->we = 0;
+    f->vd = f->ve = 2e-18; f->pyd = f->pye = 0; f->hd = f->he = 0; f->we = 0; f->veff = 0; f->tau = EFC_TAU;
     if (slope != 0) { f->slope = slope; f->state = EFC_LOCK; f->skip = 0; }
 }
 
@@ -52,6 +64,7 @@ int efc_minute2(efc_t *f, int vd, double yd, int ve, double ye, double T)
     if (vd) { if (f->hd) { double d = yd - f->pyd; f->vd += (0.5 * d * d - f->vd) / EFC_NOISE_N; } f->pyd = yd; }
     if (ve) { if (f->he) { double d = ye - f->pye; f->ve += (0.5 * d * d - f->ve) / EFC_NOISE_N; } f->pye = ye; }
     f->hd = vd; f->he = ve;
+    f->veff = vd ? f->vd : f->ve;                     /* noise of what steers (DCF77 alone / e-CzasPL alone) */
     int src = EFC_SRC_NONE; double y = 0;
     f->we = 0;
     if (vd && ve) {
@@ -63,11 +76,12 @@ int efc_minute2(efc_t *f, int vd, double yd, int ve, double ye, double T)
         } else if (fabs(r - f->bias) > EFC_DISAGREE) {
             src = EFC_SRC_DCF77; y = yd;              /* one of them is wrong this minute */
         } else {
-            f->bias += (r - f->bias) * T / EFC_BIAS_TAU;
+            if (f->vd < EFC_BIAS_VMAX) f->bias += (r - f->bias) * T / EFC_BIAS_TAU;
             double wd = 1 / f->vd, we = 1 / f->ve;
             f->we = we / (wd + we);
             if (f->we > EFC_WE_MAX) f->we = EFC_WE_MAX;
             y = f->we * (ye - f->bias) + (1 - f->we) * yd;
+            f->veff = (1 - f->we) * (1 - f->we) * f->vd + f->we * f->we * f->ve;
             src = EFC_SRC_BOTH;
         }
     } else if (vd) { src = EFC_SRC_DCF77; y = yd; }
@@ -139,7 +153,12 @@ void efc_minute(efc_t *f, int src, double y, double T)
         }
         f->outliers = 0;
         {
-            const double wn = 1.0 / EFC_TAU, kp = 2 * 0.7 * wn, ki = wn * wn;
+            double r = f->veff > 0 ? sqrt(f->veff / EFC_VREF) : 1;
+            if (r < 1) r = 1;
+            if (r > EFC_TAU_MAXF) r = EFC_TAU_MAXF;
+            f->tau += (EFC_TAU * r - f->tau) * T / 1800;  /* changes slowly (30 min) */
+            if (f->tau < EFC_TAU) f->tau = EFC_TAU;
+            const double wn = 1.0 / f->tau, kp = 2 * 0.7 * wn, ki = wn * wn;
             f->x += y * T;
             f->integ += ki * f->x * T;
             f->target = clampc(f->cref + (kp * f->x + f->integ) / f->slope);

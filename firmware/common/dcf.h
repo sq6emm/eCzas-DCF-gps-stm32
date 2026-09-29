@@ -56,6 +56,7 @@ typedef struct {
     float    pm_sigma;
     int      have_mark, have_minute;
     double   slip;                      /* drift of the DCF77 second through the LSE time scale, samples (fraction kept) */
+    int      stage; uint64_t stage_n;   /* dcf_block_step: current step and the sample of step 1 */
     int      pm_block_done;             /* the phase code has been evaluated by a 10-min block */
     int      pm_ref;                    /* phase-code fold anchor (sample in the LSE second): set from the mark once,
                                            then moved only by the drift correction, never by mark noise; -1 = unset */
@@ -70,6 +71,11 @@ int  dcf_block_ready(const dcf_t *d);
  * DCF77 tracker in LSE time: it gives the LSE crystal's rate against DCF77 itself, and the
  * fold of past blocks is shifted by the resulting drift of the DCF77 second (no other input). */
 void dcf_block(dcf_t *d, float carrier_hz);
+/* The same, spread over four samples DCF_STAGE_GAP apart (the firmware: ~8 ms per step instead of
+ * ~24 ms in one sample; the sample ring holds 30 ms). Call every sample; returns 1 on the sample
+ * that completes the block (results valid then). */
+#define DCF_STAGE_GAP 200               /* samples (0.1 s) */
+int  dcf_block_step(dcf_t *d, float carrier_hz);
 /* Before the first second marks: look for them in the current block's fold (>= 60 s tracked),
  * accept above min_sigma. Lets DCF77 be verified within a minute or two instead of at the first
  * 10-min block. Returns 1 when marks were found (d->mark, mark_sigma, have_mark set). */

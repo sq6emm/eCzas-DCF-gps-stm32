@@ -561,8 +561,9 @@ static void station_samples(float er, float ei, float dr, float di)
     /* the blind pull-in at 0 Hz (see main) found nothing within 3 min: search the normal way */
     if (n2k == 360000 && !dcf.have_mark && trk_d.state != COH_SEARCH) { coh_search(&trk_d); put_line("DCF77", "no second marks 3 min after the blind pull-in - searching"); }
 #endif
-    if (dcf_block_ready(&dcf)) {
-        dcf_block(&dcf, trk_d.state == COH_TRACK ? (float)trk_d.hz : 0.0f);
+    static float blk_hz;                  /* carrier at the block's first step (dcf_block_step) */
+    if (blk) blk_hz = trk_d.state == COH_TRACK ? (float)trk_d.hz : 0.0f;
+    if (dcf_block_step(&dcf, blk_hz)) {   /* 10-min block in four ~8 ms steps (was ~24 ms in one sample) */
         /* carrier check: a DCF77 carrier has second marks; none in the first 60 min on a
          * line -> it is something else (a local spur): reject it, search again. The count
          * goes on through re-searches that find the same line again (+-0.15 Hz: a spur moves
@@ -852,10 +853,11 @@ int main(void)
                 int vd = nd > 2, ve = ne > 2;
                 int src = efc_minute2(&efc, vd, rd2.freq_hz / F_DCF, ve, re.freq_hz / F_CARRIER, 60.0);
                 static const char *SRC[] = { "none", "DCF77", "e-CzasPL", "DCF77+e-CzasPL" };
+                if (src == EFC_SRC_BOTH && efc.we <= 0) src = EFC_SRC_DCF77;   /* e-CzasPL weight 0: DCF77 steers */
                 char b9[16], b10[16];
-                snprintf(m, sizeof m, "EFC %s = %s V, %s, source %s (e-CzasPL weight %s), offset %s ppb, time error %s ns, slope %s ppb/code | e-CzasPL-DCF77 %s ppb (%d min)",
+                snprintf(m, sizeof m, "EFC %s = %s V, %s, source %s (e-CzasPL weight %s), offset %s ppb, time error %s ns, slope %s ppb/code, loop %ld s | e-CzasPL-DCF77 %s ppb (%d min)",
                          f1(b1, efc.c, 0), f3(b7, efc.c * 3.3 / 4096), efc_state_txt(&efc), SRC[src], f3(b9, efc.we),
-                         src ? f1(b2, efc.y * 1e9, 1) : "-", f1(b3, efc.x * 1e9, 1), f3(b8, efc.slope * 1e9),
+                         src ? f1(b2, efc.y * 1e9, 1) : "-", f1(b3, efc.x * 1e9, 1), f3(b8, efc.slope * 1e9), lround(efc.tau),
                          efc.bn ? f3(b10, (efc.bn < 10 ? efc.bsum / efc.bn : efc.bias) * 1e9) : "-", efc.bn);
                 put_line("OCXO", m);
             }

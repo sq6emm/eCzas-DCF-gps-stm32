@@ -51,9 +51,9 @@ int main(int argc, char **argv)
         if ((dropout == 1 || dropout == 2) && (m % 180) >= 150) src = EFC_SRC_NONE;      /* 30 min without DCF77 every 3 h */
         if (dropout == 2 && (m % 180) >= 120 && (m % 180) < 150) src = EFC_SRC_ECZAS;
         static double pn_prev, pe_prev, sw_prev;
-        int ngt = night && m >= 120;
-        double pn = noise * (ngt ? 3 : 1) * 60 / sqrt(2) * gauss();       /* phase noise [s] */
-        double sw = ngt ? 300e-9 * sin(2 * M_PI * m / 40.0) : 0;          /* sky-wave phase */
+        int ngt = night && m >= 120;             /* NIGHT=1 both, 2 noise only, 3 sky-wave only */
+        double pn = noise * (ngt && night != 3 ? 3 : 1) * 60 / sqrt(2) * gauss();       /* phase noise [s] */
+        double sw = ngt && night != 2 ? 300e-9 * sin(2 * M_PI * m / 40.0) : 0;          /* sky-wave phase */
         double yd = ytrue + (pn - pn_prev) / 60 + (sw - sw_prev) / 60;
         double pe = enoise * 60 / sqrt(2) * gauss();
         double ye = ytrue + ebias + (pe - pe_prev) / 60;

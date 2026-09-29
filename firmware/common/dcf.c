@@ -117,27 +117,34 @@ void dcf_push(dcf_t *d, float i, float q, int valid)
 }
 
 /* second mark in a fold normalised by the carrier amplitude: sample index of the best match with
-   the 100 (+100) ms reduction, and its significance */
-static int mark_find(const float *yr, float *sigma)
+   the 100 (+100) ms reduction, and its significance. Split in two parts (coarse correlation over a
+   range of offsets, then the finish) so the 10-min block can spread the work over several samples;
+   each caller has its own buffers (the early check and the staged block never share them). */
+typedef struct { float sc[DCF_SPS / 4]; float y2[2 * DCF_SPS]; } markbuf_t;
+static markbuf_t mb_quick, mb_block;
+
+static void mark_coarse(markbuf_t *mb, const float *yr, int m0, int m1)
 {
-    static float sc[DCF_SPS];
-    static float y2[2 * DCF_SPS];                   /* yr twice: no modulo in the inner loops */
-    float med, sg; int m, k, best;
-    memcpy(y2, yr, DCF_SPS * sizeof *yr); memcpy(y2 + DCF_SPS, yr, DCF_SPS * sizeof *yr);
-    /* coarse (every 4th offset, 2 ms), then all offsets within +-2 ms of the best:
-     * ~1.1 M multiply-adds instead of 4 M, keeps the 10-min evaluation to a few ms */
-    for (m = 0; m < DCF_SPS; m += 4) {
-        const float *y = y2 + m; float s = 0;
+    int m, k;
+    if (m0 == 0) { memcpy(mb->y2, yr, DCF_SPS * sizeof *yr); memcpy(mb->y2 + DCF_SPS, yr, DCF_SPS * sizeof *yr); }
+    /* coarse (every 4th offset, 2 ms); the finish tries all offsets within +-2 ms of the best:
+     * ~1.1 M multiply-adds instead of 4 M */
+    for (m = m0; m < m1; m += 4) {
+        const float *y = mb->y2 + m; float s = 0;
         for (k = 0; k < DCF_SPS; k++) s += y[k] * T[k];
-        sc[m / 4] = s;
+        mb->sc[m / 4] = s;
     }
-    best = 0;
+}
+
+static int mark_finish(markbuf_t *mb, float *sigma)
+{
+    float med, sg, *sc = mb->sc; int m, k, best = 0;
     for (m = 1; m < DCF_SPS / 4; m++) if (sc[m] > sc[best]) best = m;
     sg = robust_sigma(sc, DCF_SPS / 4, (best - 125 + DCF_SPS / 4) % (DCF_SPS / 4), (best + 125) % (DCF_SPS / 4), &med);
     {
         int c = best * 4, bb = c; float bs = sc[best];
         for (m = c - 4; m <= c + 4; m++) {
-            int mm = (m + DCF_SPS) % DCF_SPS; float s = 0; const float *y = y2 + mm;
+            int mm = (m + DCF_SPS) % DCF_SPS; float s = 0; const float *y = mb->y2 + mm;
             if (m == c) continue;
             for (k = 0; k < DCF_SPS; k++) s += y[k] * T[k];
             if (s > bs) { bs = s; bb = mm; }
@@ -145,11 +152,17 @@ static int mark_find(const float *yr, float *sigma)
         sc[best] = bs; best = bb;
     }
     {
-        float s = 0; const float *y = y2 + best;
+        float s = 0; const float *y = mb->y2 + best;
         for (k = 0; k < DCF_SPS; k++) s += y[k] * T[k];
         *sigma = (s - med) / sg;
     }
     return best;
+}
+
+static int mark_find(markbuf_t *mb, const float *yr, float *sigma)
+{
+    mark_coarse(mb, yr, 0, DCF_SPS);
+    return mark_finish(mb, sigma);
 }
 
 int dcf_quick_mark(dcf_t *d, float min_sigma)
@@ -158,7 +171,7 @@ int dcf_quick_mark(dcf_t *d, float min_sigma)
     float s; int k, best;
     if (d->have_mark || d->nsec < 60 || d->amp <= 0) return 0;
     for (k = 0; k < DCF_SPS; k++) t[k] = d->yf[k] / (d->nsec * d->amp);
-    best = mark_find(t, &s);
+    best = mark_find(&mb_quick, t, &s);
     if (s < min_sigma) return 0;
     d->mark = best; d->mark_sigma = s; d->have_mark = 1;
     return 1;
@@ -233,10 +246,10 @@ int dcf_quick_pm(dcf_t *d)
     return d->pm_sigma > DCF_PM_MIN;
 }
 
-void dcf_block(dcf_t *d, float carrier_hz)
+/* stage 1: drift shift of the running fold, fold update; the new block's fold starts empty */
+static void block_update(dcf_t *d, float carrier_hz)
 {
-    int k, best;
-    /* second mark (running) */
+    int k;
     /* the DCF77 second lasts (1 - carrier_hz/77500) * 2000 LSE samples: over one block its start
      * moves by -carrier_hz/77500 * block samples through the LSE second; shift the running
      * fold (and the mark) by the whole samples of that drift, keep the fraction */
@@ -255,7 +268,12 @@ void dcf_block(dcf_t *d, float carrier_hz)
     }
     if (d->nsec > 0 && d->amp > 0)
         for (k = 0; k < DCF_SPS; k++) d->yr[k] = DCF_KEEP * d->yr[k] + d->yf[k] / (d->nsec * d->amp);
-    best = mark_find(d->yr, &d->mark_sigma);
+    memset(d->yf, 0, sizeof d->yf); d->nsec = 0;
+}
+
+/* after the mark search: accept it (a moved mark restarts the minute and phase-code folds) */
+static void block_mark(dcf_t *d, int best)
+{
     if (d->mark_sigma > DCF_MARK_MIN) {
         if (d->have_mark && abs(best - d->mark) > 20 && abs(best - d->mark) < DCF_SPS - 20) {
             memset(d->pmf, 0, sizeof d->pmf); d->pmn = 0;       /* the mark moved: restart the fold */
@@ -264,17 +282,50 @@ void dcf_block(dcf_t *d, float carrier_hz)
         }
         d->mark = best; d->have_mark = 1;
     }
-    memset(d->yf, 0, sizeof d->yf); d->nsec = 0;
+}
 
+static void block_minute(dcf_t *d)
+{
+    int c;
     minute_eval(d, DCF_MIN_MIN);
-    {
-        int c;
-        for (c = 0; c < 60; c++) { d->dip[c] *= DCF_KEEP; d->dipn[c] *= DCF_KEEP; }
-    }
+    for (c = 0; c < 60; c++) { d->dip[c] *= DCF_KEEP; d->dipn[c] *= DCF_KEEP; }
+}
+
+static void block_pm(dcf_t *d)
+{
+    int k;
     if (d->pmn > 20) {
         pm_eval(d);
         d->pm_block_done = 1;
         for (k = 0; k < WIN; k++) d->pmf[k] *= DCF_KEEP;
         d->pmn *= DCF_KEEP;
     }
+}
+
+void dcf_block(dcf_t *d, float carrier_hz)
+{
+    block_update(d, carrier_hz);
+    block_mark(d, mark_find(&mb_block, d->yr, &d->mark_sigma));
+    block_minute(d);
+    block_pm(d);
+}
+
+/* the same work in four steps DCF_STAGE_GAP samples apart (~8 ms each instead of ~24 ms at once) */
+int dcf_block_step(dcf_t *d, float carrier_hz)
+{
+    uint64_t dn = d->n - d->stage_n;
+    if (dcf_block_ready(d)) {
+        block_update(d, carrier_hz);
+        mark_coarse(&mb_block, d->yr, 0, DCF_SPS / 2);
+        d->stage = 1; d->stage_n = d->n;
+        return 0;
+    }
+    if (d->stage == 1 && dn == DCF_STAGE_GAP) {
+        mark_coarse(&mb_block, d->yr, DCF_SPS / 2, DCF_SPS);
+        block_mark(d, mark_finish(&mb_block, &d->mark_sigma));
+        d->stage = 2; return 0;
+    }
+    if (d->stage == 2 && dn == 2 * DCF_STAGE_GAP) { block_minute(d); d->stage = 3; return 0; }
+    if (d->stage == 3 && dn == 3 * DCF_STAGE_GAP) { block_pm(d); d->stage = 0; return 1; }
+    return 0;
 }

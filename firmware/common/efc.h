@@ -1,5 +1,10 @@
 /*
- * OCXO steering (EFC) from BOTH received carriers, combined like a GPSDO combines its inputs:
+ * OCXO steering (EFC) from the received carriers. Default (29 Sep 2026, efcsim): DCF77 is the only
+ * reference (EFC_WE_MAX 0) with a loop that slows down when DCF77 is noisy (EFC_TAU_MAXF 6); e-CzasPL
+ * steers only when DCF77 is lost, with its offset learned while DCF77 is clean (EFC_BIAS_VMAX).
+ * Mixing the two stations' frequencies (EFC_WE_MAX 1) was worse at night: any offset error or DCF77
+ * noise in the learned offset is integrated into time (efcsim night 585 ns vs 98 ns).
+ * The combination machinery (EFC_WE_MAX > 0):
  *  - e-CzasPL's own offset against DCF77 (PTB-steered, the accuracy reference) is learned slowly
  *    (EFC_BIAS_TAU, while both are locked) and removed from e-CzasPL;
  *  - the two are then weighted by their measured minute-to-minute noise (inverse variance), so
@@ -36,6 +41,7 @@ typedef struct {
     double bias, bsum; int bn;     /* e-CzasPL - DCF77 [fraction], learned */
     double vd, ve, pyd, pye; int hd, he;   /* minute-to-minute noise variances, previous values */
     double we;                     /* weight of e-CzasPL in the last combined minute */
+    double veff, tau;              /* noise variance of the steering measurement, loop time constant in use */
 } efc_t;
 
 /* slope 0: calibrate first; otherwise the known slope [fraction per code] -> straight to LOCK */

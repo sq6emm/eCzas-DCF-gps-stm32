@@ -58,7 +58,11 @@ int main(int argc, char **argv)
         if (quick > 1 && n % 20000 == 6000 && !dcf_block_ready(&dcf)) dcf_quick_minute(&dcf, getenv("DCF_QMIN") ? (float)atof(getenv("DCF_QMIN")) : 8.0f);   /* samples as main.c */
         if (quick > 1 && n % 20000 == 13000 && !dcf_block_ready(&dcf)) dcf_quick_pm(&dcf);
         if (blind && n == 360000 && !dcf.have_mark) coh_search(&trk);
-        if (dcf_block_ready(&dcf)) {
+        static int staged = -1; if (staged < 0) staged = getenv("DCF_STAGED") ? atoi(getenv("DCF_STAGED")) : 0;
+        if (staged) {                                /* as the firmware: dcf_block_step every sample */
+            if (dcf_block_ready(&dcf)) { coh_report_t r; coh_report(&trk, &r); }
+            dcf_block_step(&dcf, trk.state == COH_TRACK ? (float)trk.hz : 0.0f);
+        } else if (dcf_block_ready(&dcf)) {
             coh_report_t r; coh_report(&trk, &r);
             dcf_block(&dcf, trk.state == COH_TRACK ? (float)trk.hz : 0.0f);
         }

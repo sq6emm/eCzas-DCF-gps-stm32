@@ -44,9 +44,18 @@ int main(int argc, char **argv)
             static int pm_said; if ((n - n0) % 20000 == 13000 && dcf_quick_pm(&dcf) && !pm_said) { pm_said = 1; printf("# quick phase code at %.0f s: %+.3f ms, %.1f sigma\n", (n - n0) / 2000.0, dcf.pm_lag_ms, dcf.pm_sigma); }
         }
         if (blind && (n - n0) == 360000 && !dcf.have_mark) { printf("# blind pull-in: no marks after 180 s, search\n"); coh_search(&trk); }
-        if (dcf_block_ready(&dcf)) {
-            coh_report_t r; coh_report(&trk, &r);
+        static int staged = -1; if (staged < 0) staged = getenv("DCF_STAGED") ? atoi(getenv("DCF_STAGED")) : 0;
+        static coh_report_t r; static float blk_hz;
+        int done = 0;
+        if (staged) {                                /* as the firmware: dcf_block_step every sample */
+            if (dcf_block_ready(&dcf)) { coh_report(&trk, &r); blk_hz = trk.state == COH_TRACK ? (float)trk.hz : 0.0f; }
+            done = dcf_block_step(&dcf, blk_hz);
+        } else if (dcf_block_ready(&dcf)) {
+            coh_report(&trk, &r);
             dcf_block(&dcf, trk.state == COH_TRACK ? (float)trk.hz : 0.0f);
+            done = 1;
+        }
+        if (done) {
             /* carrier check: a DCF77 carrier has second marks. No mark 60 min after locking
              * -> this line is something else (a local spur): reject it and search again. */
             static int blocks_locked = 0, proven = 0; static float line_hz = 1e9;
