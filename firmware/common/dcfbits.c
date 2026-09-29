@@ -9,6 +9,9 @@
 #ifndef DCFB_PRED_MARGIN
 #define DCFB_PRED_MARGIN 10.0f       /* ... and its lead over the minutes +-1, +-2 */
 #endif
+#ifndef DCFB_GRID_TOL
+#define DCFB_GRID_TOL    0.5         /* a reference minute counts only while the minute ends stay on its */
+#endif                               /* grid: whole minutes after it, +-0.5 s (+20 ppm of the time since) */
 
 extern uint8_t dcf_prn_bits[512];          /* the PTB sequence, built by dcf_init() */
 
@@ -115,6 +118,16 @@ static int check(dcfbits_t *b, const uint8_t *x)
     return 1;
 }
 
+/* whole minutes from n0 to n_end; 0 when n_end is off n0's minute grid (the minute marker moved:
+   the minutes could then be rounded to the wrong count, and each accepted expected frame would
+   carry the error on - seen on 29 Sep 2026 with a marker 30 s off after an input gap) */
+static int on_grid(uint64_t n_end, uint64_t n0, int64_t *el)
+{
+    double dn = (double)(n_end - n0);
+    *el = (int64_t)llround(dn / (60.0 * DCF_SPS));
+    return fabs(dn - (double)*el * 60.0 * DCF_SPS) <= (DCFB_GRID_TOL + 20e-6 * dn / DCF_SPS) * DCF_SPS;
+}
+
 static void decode(dcfbits_t *b, uint64_t n_end)
 {
     uint8_t x[59]; float r[59];
@@ -141,8 +154,9 @@ static void decode(dcfbits_t *b, uint64_t n_end)
     b->ready = 1;
     int ok = check(b, x);
     b->pred_score = b->pred_margin = 0;
+    int64_t el;
+    if (b->have_ref && !on_grid(n_end, b->ref_n_end, &el)) b->have_ref = 0;   /* start again from standalone decodes */
     if (b->have_ref) {                                        /* expected-frame confirmation */
-        int64_t el = (int64_t)llround((double)(n_end - b->ref_n_end) / (60.0 * DCF_SPS));
         int64_t te = b->ref_utc_min + el;
         float sc[5]; uint8_t y[59]; int d;
         float zz[59];
@@ -173,8 +187,7 @@ static void decode(dcfbits_t *b, uint64_t n_end)
     b->n_decoded++;
     /* first confirmation: two standalone decodes that agree with the minutes elapsed */
     b->status = DCFT_UNCONFIRMED;
-    if (b->have_last) {
-        int64_t el = (int64_t)llround((double)(n_end - b->last_n_end) / (60.0 * DCF_SPS));
+    if (b->have_last && on_grid(n_end, b->last_n_end, &el)) {
         if (b->utc_min == b->last_utc_min + el) {
             b->status = DCFT_CONFIRMED; b->n_confirmed++;
             b->have_ref = 1; b->ref_utc_min = b->utc_min; b->ref_n_end = n_end; b->ref_cest = b->cest;
