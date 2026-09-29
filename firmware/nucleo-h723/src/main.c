@@ -304,6 +304,12 @@ static volatile uint32_t lse_log[64]; static volatile int lse_log_n;
 static volatile uint64_t lse_tot_ticks, lse_tot_caps;   /* running totals for per-block rate */
 #define CAPR 512                           /* ring of capture tick counts (125 ms) */
 static volatile uint64_t cap_tick[CAPR];
+#ifdef OCXO_REF
+/* GPS PPS (u-blox LEA-M8T TIMEPULSE) on PC8 = TIM3_CH3: the same counter that timestamps the OCXO,
+   so the pulse lands on the samples' own time base (5 ns steps). Nothing connected = no captures. */
+static volatile uint64_t pps_tick; static volatile uint32_t pps_seq;
+static double pps_tt; static int pps_new;   /* the last pulse in true time (capture units), not yet reported */
+#endif
 static int lse_ok;
 #ifdef OCXO_REF
 static TIM_HandleTypeDef htim2, htim3;
@@ -346,6 +352,16 @@ static void ocxo_init(void)
     HAL_NVIC_EnableIRQ(TIM3_IRQn);
     HAL_TIM_Base_Start(&htim2);
     HAL_TIM_IC_Start_IT(&htim3, TIM_CHANNEL_1);
+    {   /* GPS PPS input: PC8 (CN8, D43) = TIM3_CH3, AF2, pull-down (nothing connected = quiet) */
+        __HAL_RCC_GPIOC_CLK_ENABLE();
+        GPIO_InitTypeDef gp = {0};
+        gp.Pin = GPIO_PIN_8; gp.Mode = GPIO_MODE_AF_PP; gp.Pull = GPIO_PULLDOWN; gp.Speed = GPIO_SPEED_FREQ_LOW; gp.Alternate = GPIO_AF2_TIM3;
+        HAL_GPIO_Init(GPIOC, &gp);
+        TIM_IC_InitTypeDef i3 = {0};
+        i3.ICPolarity = TIM_ICPOLARITY_RISING; i3.ICSelection = TIM_ICSELECTION_DIRECTTI; i3.ICPrescaler = TIM_ICPSC_DIV1; i3.ICFilter = 3;
+        HAL_TIM_IC_ConfigChannel(&htim3, &i3, TIM_CHANNEL_3);
+        HAL_TIM_IC_Start_IT(&htim3, TIM_CHANNEL_3);
+    }
     /* which internal trigger carries TIM2's TRGO? (TIM3: ITR1 per the usual STM32 mapping) -
        try each for 250 ms and keep the one that gives 4 kHz */
     static const uint32_t itr[4] = { TIM_TS_ITR1, TIM_TS_ITR0, TIM_TS_ITR2, TIM_TS_ITR3 };
@@ -390,6 +406,13 @@ void TIM3_IRQHandler(void)
 void TIM16_IRQHandler(void)
 #endif
 {
+#ifdef OCXO_REF
+    if (REF_TIM->SR & TIM_SR_CC3IF) {          /* GPS PPS: < 250 us after the last OCXO capture */
+        uint32_t c3 = REF_TIM->CCR3;           /* reading CCR3 clears CC3IF */
+        pps_tick = lse_tot_ticks + ((c3 - lse_last) & 0xFFFF);
+        pps_seq++;
+    }
+#endif
     if (REF_TIM->SR & TIM_SR_CC1IF) {
         uint32_t c = REF_TIM->CCR1;            /* reading CCR1 clears CC1IF */
         uint32_t d = (c - lse_last) & 0xFFFF;
@@ -399,7 +422,7 @@ void TIM16_IRQHandler(void)
         if (++lse_cnt == LSE_WIN + 1) { lse_tps = lse_sum; lse_seq++; lse_sum = 0; lse_cnt = 1;
             if (lse_log_n < 64) lse_log[lse_log_n++] = lse_tps; }
     }
-    REF_TIM->SR = 0;
+    REF_TIM->SR = ~(TIM_SR_CC1IF | TIM_SR_CC3IF);   /* clear the rest; a capture flag set meanwhile stays */
 }
 
 static double cur_tps_ratio = 1.0;        /* true / nominal sample rate */
@@ -433,6 +456,7 @@ static int64_t pl_c;
 static double F_true = F_CARRIER;          /* mixer frequency in true Hz */
 static double pl_t;                        /* true time (capture units) at the next block start */
 static double pl_cyc;                      /* mixer phase (cycles, fractional) at the next block start */
+static double pl_t0; static uint64_t pl_n0; /* true time (capture units) of 2 kHz sample pl_n0: the 2 kHz scale is exact true time from there */
 static void pl_calibrate(uint64_t written)
 {
     __disable_irq();
@@ -844,10 +868,21 @@ int main(void)
         } else if (lse_ok && lse_seq >= 2) {
             pl_calibrate(wr);
             pl_t = true_time(200 * (int64_t)rd + pl_c); pl_cyc = 0;
+            pl_t0 = pl_t; pl_n0 = n2k;
             F_true = F_CARRIER;                /* fixed; the carrier trackers follow the rest */
             pl_ok = 1;
         }
         process_block(b, mean, mean2);
+#ifdef OCXO_REF
+        {   /* GPS PPS: convert to true time at once - the capture ring (CAPR) holds only ~128 ms */
+            static uint32_t conv;
+            uint32_t q = pps_seq;
+            if (q != conv && pl_ok) {
+                __disable_irq(); uint64_t pt = pps_tick; __enable_irq();
+                conv = q; pps_tt = true_time((int64_t)pt); pps_new = 1;
+            }
+        }
+#endif
         {   /* LD1 / LD2: carrier locked, inverted for LED_BLINK after a decode */
             int l1 = trk_e.state == COH_TRACK && trk_e.err_avg * 360 < 25, l2 = dcf_verified();
             if (n2k < led1_until) l1 = !l1;
@@ -865,6 +900,36 @@ int main(void)
             next_s += 2000;
             blk_ratio_sum = 0; blk_ratio_n = 0;
             tk_maintain(&tk, now_tick());
+#ifdef OCXO_REF
+            {   /* GPS PPS: OCXO interval error, e-CzasPL clock and DCF77 second against the GPS second */
+                static double t_prev; static uint32_t n_pps;
+                if (pps_new) {
+                    pps_new = 0; n_pps++;
+                    double tt = pps_tt;                                    /* capture units */
+                    double n2 = (double)pl_n0 + (tt - pl_t0) * REF_CAP_S / 0.0005;   /* on the 2 kHz scale */
+                    char m[220], b1[16], b2[24], b3[24];
+                    const char *fr = "-", *ez_s = "-", *dc_s = "-";
+                    if (t_prev > 0) {
+                        double dt = (tt - t_prev) * REF_CAP_S;             /* OCXO seconds between two GPS seconds */
+                        if (dt > 0.9 && dt < 1.1) fr = f1(b1, (1.0 - dt) * 1e9, 1);   /* > 0: OCXO slow */
+                    }
+                    t_prev = tt;
+                    uint32_t sec, us;
+                    if (tk.synced && tk_time(&tk, (int64_t)(n2 * (TICKS_PER_BLOCK / 4)), &sec, &us)) {
+                        double ms = us / 1000.0; if (ms >= 500) ms -= 1000;     /* > 0: e-CzasPL clock ahead */
+                        ez_s = f3(b2, ms);
+                    }
+                    if (dcf.have_mark) {
+                        double start = (double)(((uint64_t)n2 - dcf.mark) / 2000 * 2000 + dcf.mark) + (dcf.pm_sigma > DCF_PM_MIN ? dcf.pm_lag_ms * 2.0 : 0);
+                        double x = fmod(n2 - start, 2000.0); if (x < 0) x += 2000; if (x >= 1000) x -= 2000;
+                        dc_s = f3(b3, x / 2.0);                            /* > 0: the DCF77 second began before the GPS second */
+                    }
+                    snprintf(m, sizeof m, "PPS #%lu | OCXO %s ppb (1 s) | e-CzasPL clock %s ms | DCF77 second %s ms%s",
+                             (unsigned long)n_pps, fr, ez_s, dc_s, dcf.pm_sigma > DCF_PM_MIN ? " (phase code)" : " (second mark)");
+                    put_line("GPS", m);
+                }
+            }
+#endif
             {   /* hourly statistics: expected minutes, hour change */
                 uint32_t sec;
                 if (tk.synced && tk_time(&tk, now_tick(), &sec, 0)) {
