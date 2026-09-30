@@ -44,3 +44,21 @@ Bench, 22:40-23:26 (46 min), complex noise, 3 seeds per level:
 | 22 dB-Hz | 46 % | 0 |
 | <= 20 dB-Hz | 0 % | 0 |
 
+
+### On real signal: IC-7610, 30 Sep 2026 19:10-21:00 UTC (no noise added)
+
+IC-7610 SUB on 163.000 USB (TDF at IF 13 kHz, K9AY NW+LNA), MAIN stayed on e-CzasPL; TDF at ~66 dB-Hz
+by night (by day at 10:54 UTC the same setup gave no TDF carrier at all: ground wave only, 1162 km).
+11 ten-minute files converted with `tdf_c64.py` to `/data/claude/tdfbench/tdf_ic7610_20260930_1910.c64`
+(6600 s), run through `tdfsim` (coh.c + tdf.c, the chain a NUCLEO 162 kHz mixer would feed); truth = the
+recorder's file clock (NTP):
+
+| minutes evaluated | confirmed | decoded, unconfirmed | failed | WRONG | parity repairs |
+|---|---|---|---|---|---|
+| 107 | 106 | 1 (the first, 21:14 CEST) | 0 | 0 | 0 |
+
+First decoded minute ~4 min after the start (second start + minute marker have to be found first).
+The second-start estimate moved 3 -> 7 -> 11 ms over the 2 h: the recording's clock (~48000.1 samples/s
+against the nominal 48000, ~1 ms per 10-min file), not TDF. At this level the test proves the decoder on
+real ALS162 transmissions, not its weak-signal margin: for that see the noise bench above (0 % below
+~20 dB-Hz); TDF on the existing NUCLEO rods was only 7-11 dB-Hz, so a 162 kHz rod is needed.
