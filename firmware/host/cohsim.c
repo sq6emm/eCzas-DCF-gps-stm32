@@ -117,7 +117,7 @@ int main(int argc, char **argv)
         sr = si = 0;
         if (ez.cand_ready) {
             frame_info_t fi; frame_status_t st = frame_decode(ez.cand.ph + CAND_PRE, &fi);
-            int64_t base = (int64_t)(ez.cand.start_block - 1) * TICKS_PER_BLOCK;
+            int64_t base = (int64_t)(ez.cand.start_block - 1) * TICKS_PER_BLOCK + (int64_t)ECZ_TEMPLATE_LAG_US * (FCY_HZ / 1000000L);
             int64_t tick = base + (int64_t)(st == FR_OK ? fi.timing_q15 : ez.cand.frac_q15) * TICKS_PER_BLOCK / 32768;
             double tsec = (double)tick / FCY_HZ;
             n_cand++;

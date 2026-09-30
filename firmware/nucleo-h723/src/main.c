@@ -738,7 +738,8 @@ static void handle_candidate(void)
     dsp_cand_t *c = &ez.cand;
     frame_info_t fi;
     char m[240], d1[40], b1[16];
-    int64_t tick = (int64_t)(c->start_block - 1) * TICKS_PER_BLOCK;   /* 500 Hz block = 4 samples */
+    int64_t tick = (int64_t)(c->start_block - 1) * TICKS_PER_BLOCK   /* 500 Hz block = 4 samples */
+                 + (int64_t)ECZ_TEMPLATE_LAG_US * (FCY_HZ / 1000000L); /* template lag, see ecz.h */
     memset(&fi, 0, sizeof fi);
     frame_status_t st = frame_decode(c->ph + CAND_PRE, &fi);
     if (st == FR_NOT_TIME) { ez.cand_ready = 0; return; }
