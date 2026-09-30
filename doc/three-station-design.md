@@ -33,6 +33,8 @@ its station: -6 dB. So: **a "V" / "L" layout, not a triangle** (drawing: `three_
 Rods to order (one type for all three, 10 x 150 mm, L1 = 500 uH + 7-turn link winding, tuned by
 capacitors at the rod), with a copy-and-paste manufacturer specification (English + Chinese), the
 capacitor / Q table and the acceptance checks: `rod-antenna-spec.md`.
+Front end (rods + amplifiers in an antenna head, CAT6 to the main board, one-line option, GPS in the
+head): `frontend-architecture.md`.
 
 Coupling between the rods (they are tuned to 77.5 / 162 / 225 kHz, ratios 1.39 and 2.1):
 - Off its own resonance a tuned rod is a low impedance (below resonance inductive, above

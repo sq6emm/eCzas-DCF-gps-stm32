@@ -85,10 +85,16 @@ Application: LF receiving antenna, 70-250 kHz (time signal reception)
 ```
 (The Chinese text is our translation of the English above; if in doubt, the English is binding.)
 
+Length: 100-150 mm is fine (100 mm: ~-4.5 dB of signal, but the antenna noise stays ~10 dB above the ADC
+floor, so practically no SNR loss); not below ~80 mm. The inductance and the capacitors stay the same.
+
 ## 2. Our part: tuning, Q, cable
 
-Capacitors: C0G/NP0, 1-2 %, soldered **at the rod** across L1 (never at the board end of the cable: the
-cable capacitance must stay outside the tuned circuit). Calculated for L1 = 500 uH:
+Capacitors: C0G/NP0, 1-2 %, soldered **at the rod** across L1. CORRECTION (30 Sep): the capacitor's position
+alone does not keep a cable out of the tuning - a cable on L1 is in parallel with the tank wherever C sits.
+The cable must hang on the amplifier output (antenna head, `frontend-architecture.md`) or on the 7-turn
+link L2 (capacitance transformed down ~50-100x); L1 only ever sees a few cm of wiring. Calculated for
+L1 = 500 uH:
 
 | station | f | C (500 uH) | practical | R across L1 for Q ~ 30 |
 |---|---|---|---|---|
@@ -99,7 +105,9 @@ cable capacitance must stay outside the tuned circuit). Calculated for L1 = 500 
 C = 1 / ((2 pi f)^2 L) - recompute with each rod's measured L (+-10 % tolerance). Q ~ 30 (R = Q 2 pi f L)
 keeps enough bandwidth for DCF77's phase code (+-650 Hz; needs Q <= ~50 at 77.5 kHz) and makes the
 resonance insensitive to temperature (timing). The 7-turn L2 (with ~50-70 turns on L1: impedance
-~50-100x lower, ~100-350 Ohm) feeds the coax to the board / input buffer.
+~50-100x lower, ~100-350 Ohm) can feed a cable - but it also lowers the voltage ~8x (-18 dB), below the ADC
+noise floor without an amplifier; the planned front end has an amplifier at each rod in an antenna head
+(`frontend-architecture.md`).
 
 Why the material hardly matters: for a 10 x 150 mm rod (length/diameter 15) the effective permeability
 is set by the geometry - about 75 for NiZn mu_i 400, about 90 for MnZn mu_i 2300 (demagnetisation
