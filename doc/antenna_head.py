@@ -1,4 +1,4 @@
-"""Antenna head (rods + amplifiers + GPS antenna) - top view to scale and signal chain. Draws doc/antenna_head.pdf (+ png).
+"""Antenna head (rods + amplifiers, Hammond 1554VAL2GY) - top view to scale and signal chain. Draws doc/antenna_head.pdf (+ png).
   docker run --rm -e HOME=/tmp -v $PWD/doc:/o python:3.12-slim sh -c "pip -q install --user matplotlib && python3 /o/antenna_head.py"
 Details: frontend-architecture.md, rod-antenna-spec.md, three-station-design.md.
 """
@@ -9,98 +9,109 @@ from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.patches import FancyBboxPatch, Rectangle, Circle, FancyArrowPatch
 
 BLUE, GREY, RED, GREEN, PURPLE, ORANGE = "#1f4e79", "#666", "#b22222", "#2e7d32", "#6a1b9a", "#e67e22"
-ROD_L, ROD_D, KEEP = 150.0, 10.0, 15.0                       # mm
+ROD_L, ROD_D, KEEP = 100.0, 10.0, 12.0                       # mm
 
 
 def u(bearing):                                               # compass bearing -> unit vector (north up)
     a = np.radians(bearing); return np.array([np.sin(a), np.cos(a)])
 
 
-def rod(ax, c, axis_bearing, color, name, amp_side):
-    c = np.array(c, float); d = u(axis_bearing); n = np.array([-d[1], d[0]])
+BOX_W, BOX_H = 152.0, 232.0                                   # Hammond 1554VAL2GY inside (approx.), mm
+
+
+def rod(ax, c, vertical, color, name, amp_dx, amp_dy):
+    c = np.array(c, float); d = np.array([0.0, 1.0]) if vertical else np.array([1.0, 0.0])
     p0, p1 = c - d * ROD_L / 2, c + d * ROD_L / 2
-    # copper-free zone
-    ang = np.degrees(np.arctan2(d[1], d[0]))
-    ax.add_patch(FancyBboxPatch((c[0] - (ROD_L / 2 + KEEP), c[1] - (ROD_D / 2 + KEEP)), ROD_L + 2 * KEEP, ROD_D + 2 * KEEP,
-                                boxstyle="round,pad=0,rounding_size=12", fc="#f4f4f4", ec=GREY, lw=0.6, ls="--",
-                                transform=matplotlib.transforms.Affine2D().rotate_deg_around(c[0], c[1], ang) + ax.transData))
-    ax.plot(*zip(p0, p1), color="#333", lw=7, solid_capstyle="butt")              # rod
-    w0, w1 = c - d * 25, c + d * 25
-    ax.plot(*zip(w0, w1), color=color, lw=11, solid_capstyle="butt", alpha=0.85)  # L1 (+ L2 on top)
-    ax.text(*(c - n * amp_side * 40), name, ha="center", va="center", fontsize=8.5, color=color, weight="bold",
-            rotation=ang - 90 if abs(ang - 90) < 45 else 0)
-    # amplifier module at the rod
-    a = c + n * amp_side * 45
-    ax.add_patch(FancyBboxPatch((a[0] - 22, a[1] - 11), 44, 22, boxstyle="round,pad=1", fc="white", ec=color, lw=1.2))
-    ax.text(a[0], a[1], "C+R\namp", ha="center", va="center", fontsize=6.5, color=color)
-    ax.plot(*zip(c + n * amp_side * 8, a - n * amp_side * 11), color=color, lw=1.0)
+    w, h = (ROD_D + 2 * KEEP, ROD_L + 2 * KEEP) if vertical else (ROD_L + 2 * KEEP, ROD_D + 2 * KEEP)
+    ax.add_patch(Rectangle((c[0] - w / 2, c[1] - h / 2), w, h, fc="#f4f4f4", ec=GREY, lw=0.6, ls="--"))
+    ax.plot(*zip(p0, p1), color="#333", lw=7, solid_capstyle="butt")                # rod
+    ax.plot(*zip(c - d * 20, c + d * 20), color=color, lw=11, solid_capstyle="butt", alpha=0.85)  # L1 + L2
+    for s in (-1, 1):                                                                 # plastic standoffs / clips
+        q = c + d * s * 38
+        ax.add_patch(Circle(q, 3, fc="white", ec="#999", lw=0.8))
+    a = c + np.array([amp_dx, amp_dy])
+    ax.add_patch(FancyBboxPatch((a[0] - 14, a[1] - 9), 28, 18, boxstyle="round,pad=0.5", fc="white", ec=color, lw=1.2))
+    ax.text(a[0], a[1], "C+R\nLNA", ha="center", va="center", fontsize=5.8, color=color)
+    ax.plot(*zip(c, a), color=color, lw=0.9)
     return a
 
 
 def page1(pdf):
     fig = plt.figure(figsize=(11.69, 8.27))
-    fig.text(0.04, 0.95, "Antenna head - top view to scale (mm), north up", fontsize=15, weight="bold", color=BLUE)
-    fig.text(0.04, 0.925, "Plastic box with sky view (attic / roof / window). Rods 10 x 150 mm, L1 500 uH + 7-turn L2 (rod-antenna-spec.md); "
-             "one amplifier module per rod; CAT6 to the main board.", fontsize=9, color=GREY)
-    ax = fig.add_axes([0.03, 0.05, 0.62, 0.86]); ax.set_aspect("equal"); ax.axis("off")
-    W, H = 500, 430
-    ax.add_patch(Rectangle((0, 0), W, H, fc="white", ec=BLUE, lw=2))
-    ax.text(6, H - 12, "head enclosure (plastic, no metal) ~ 500 x 430 mm", fontsize=8, color=BLUE)
-    # rods: axis perpendicular to the station bearing
-    aD = rod(ax, (110, 290), 261 - 90, BLUE, "DCF77 77.5 kHz", +1)
-    aT = rod(ax, (270, 290), 254 - 90, GREEN, "TDF 162 kHz", +1)
-    aE = rod(ax, (385, 120), 20 - 90, RED, "e-CzasPL 225 kHz", -1)
-    # main head board: power, TVS, CAT6 - in line with the DCF77 / TDF rod axes (their null)
-    bx, by = 150, 30
-    ax.add_patch(FancyBboxPatch((bx, by), 110, 55, boxstyle="round,pad=2", fc="#fff8e6", ec=ORANGE, lw=1.4))
-    ax.text(bx + 55, by + 38, "head board", ha="center", fontsize=8, weight="bold", color=ORANGE)
-    ax.text(bx + 55, by + 14, "LDO (no switcher)\nTVS, CAT6 jack\n(opt.: GPS module, shielded)", ha="center", fontsize=6.5, color=ORANGE)
-    for a, col in ((aD, BLUE), (aT, GREEN), (aE, RED)):
-        ax.annotate("", xy=(bx + 55, by + 57), xytext=a, arrowprops=dict(arrowstyle="-", color=col, lw=0.9, ls=(0, (4, 2))))
-    ax.annotate("", xy=(bx + 55, -40), xytext=(bx + 55, by - 2), arrowprops=dict(arrowstyle="->", color=ORANGE, lw=2))
-    ax.text(bx + 62, -30, "CAT6 to the main board (tens of m)", fontsize=8, color=ORANGE)
-    # GPS antenna
-    g = np.array([440.0, 392.0])
-    ax.add_patch(FancyBboxPatch((g[0] - 25, g[1] - 18), 50, 36, boxstyle="round,pad=2", fc="#efe6f5", ec=PURPLE, lw=1.3))
-    ax.text(g[0], g[1], "GPS\nantenna", ha="center", va="center", fontsize=7, color=PURPLE)
-    ax.add_patch(Circle(g, 150, fill=False, ec=PURPLE, lw=0.8, ls=":"))
-    ax.text(g[0] - 20, g[1] - 110, ">= 150 mm from\nevery rod (magnet\n+ ground plate)", fontsize=6.5, color=PURPLE)
-    ax.annotate("", xy=(W + 40, g[1]), xytext=(g[0] + 27, g[1]), arrowprops=dict(arrowstyle="->", color=PURPLE, lw=1.2))
-    ax.text(W + 5, g[1] + 8, "GPS coax\n(variant a)", fontsize=6.5, color=PURPLE)
-    # spacing dimension between DCF77 and TDF rods
-    ax.annotate("", xy=(110, 380), xytext=(270, 380), arrowprops=dict(arrowstyle="<->", color=GREY, lw=0.8))
-    ax.text(190, 385, ">= 150 mm", ha="center", fontsize=7, color=GREY)
-    ax.text(8, 190, "dashed: copper-free zone\n>= 15 mm around each rod", fontsize=6.5, color=GREY)
-    ax.set_xlim(-10, W + 70); ax.set_ylim(-50, H + 10)
-    # compass + bearings
-    cx = fig.add_axes([0.68, 0.45, 0.28, 0.42]); cx.set_aspect("equal"); cx.axis("off"); cx.set_xlim(-1.4, 1.4); cx.set_ylim(-1.4, 1.4)
+    fig.text(0.04, 0.95, "Antenna head - top view to scale (mm)", fontsize=15, weight="bold", color=BLUE)
+    fig.text(0.04, 0.905, "Hammond 1554VAL2GY (polycarbonate IP68, 240 x 160 x 60 mm outside, ~232 x 152 x 53 inside); rods 10 x 100 mm,\n"
+             "L1 500 uH + 7-turn L2 (rod-antenna-spec.md); head board under the rods; GPS: separate antenna.", fontsize=9, color=GREY)
+    ax = fig.add_axes([0.03, 0.05, 0.40, 0.86]); ax.set_aspect("equal"); ax.axis("off")
+    ax.add_patch(FancyBboxPatch((-4, -4), BOX_W + 8, BOX_H + 8, boxstyle="round,pad=0,rounding_size=8", fc="none", ec=BLUE, lw=2.2))
+    ax.add_patch(Rectangle((0, 0), BOX_W, BOX_H, fc="white", ec=BLUE, lw=0.6))
+    for x, y in ((6, 6), (BOX_W - 6, 6), (6, BOX_H - 6), (BOX_W - 6, BOX_H - 6)):     # lid-screw bosses
+        ax.add_patch(Circle((x, y), 5, fc="#dde", ec=BLUE, lw=0.6))
+    # head board under the rods (dashed): copper only in the amplifier strip and the supply corner
+    ax.add_patch(Rectangle((8, 14), BOX_W - 16, BOX_H - 28, fc="none", ec=ORANGE, lw=1.2, ls=(0, (6, 3))))
+    ax.add_patch(Rectangle((112, 110), 32, 104, fc="#fff3dc", ec=ORANGE, lw=0.8))
+    ax.text(128, 105, "amp strip\n(ground\nplane only\nhere)", ha="center", va="top", fontsize=5.5, color=ORANGE)
+    ax.add_patch(Rectangle((96, 16), 48, 22, fc="#fff3dc", ec=ORANGE, lw=0.8))
+    ax.text(120, 27, "LDO, TVS\nCAT6", ha="center", va="center", fontsize=5.8, color=ORANGE)
+    ax.annotate("", xy=(120, -32), xytext=(120, 16), arrowprops=dict(arrowstyle="->", color=ORANGE, lw=2))
+    ax.text(124, -24, "cable gland:\nCAT6 to the\nmain board", fontsize=6.5, color=ORANGE)
+    aD = rod(ax, (30, 160), True, BLUE, "DCF77", 98, 25)
+    aT = rod(ax, (75, 160), True, GREEN, "TDF", 53, -25)
+    aE = rod(ax, (62, 58), False, RED, "e-CzasPL", 0, 30)
+    ax.text(24, 238, "DCF77 77.5 kHz", ha="center", fontsize=7, color=BLUE, weight="bold", va="bottom")
+    ax.text(90, 238, "TDF 162 kHz", ha="center", fontsize=7, color=GREEN, weight="bold", va="bottom")
+    ax.text(62, 34, "e-CzasPL 225 kHz", ha="center", fontsize=7, color=RED, weight="bold", va="top")
+    ax.annotate("", xy=(30, 102), xytext=(75, 102), arrowprops=dict(arrowstyle="<->", color=GREY, lw=0.7))
+    ax.text(52, 96, "45", ha="center", fontsize=6.5, color=GREY)
+    ax.annotate("", xy=(-12, 0), xytext=(-12, BOX_H), arrowprops=dict(arrowstyle="<->", color=GREY, lw=0.7))
+    ax.text(-16, BOX_H / 2, "~232", rotation=90, ha="right", va="center", fontsize=7, color=GREY)
+    ax.annotate("", xy=(0, BOX_H + 26), xytext=(BOX_W, BOX_H + 26), arrowprops=dict(arrowstyle="<->", color=GREY, lw=0.7))
+    ax.text(BOX_W / 2, BOX_H + 30, "~152", ha="center", fontsize=7, color=GREY)
+    ax.annotate("N\n(~182 deg)", xy=(BOX_W + 32, BOX_H - 10), xytext=(BOX_W + 32, BOX_H - 70), ha="center", fontsize=7.5,
+                color=GREY, weight="bold", arrowprops=dict(arrowstyle="->", color=GREY, lw=1.6))
+    ax.set_xlim(-40, BOX_W + 60); ax.set_ylim(-45, BOX_H + 40)
+    # side view
+    sx = fig.add_axes([0.45, 0.62, 0.22, 0.25]); sx.set_aspect("equal"); sx.axis("off")
+    sx.add_patch(Rectangle((0, 0), BOX_W, 53, fc="white", ec=BLUE, lw=1.2))
+    sx.add_patch(Rectangle((8, 4), BOX_W - 16, 1.6, fc=ORANGE, ec="none"))
+    sx.text(BOX_W - 10, 7, "board", ha="right", fontsize=6, color=ORANGE)
+    for x in (30, 75):
+        sx.add_patch(Rectangle((x - 4, 5.6), 8, 18, fc="#ddd", ec="#999", lw=0.6))
+        sx.add_patch(Circle((x, 28.6), 5, fc="#333", ec="none"))
+    sx.annotate("", xy=(-6, 5.6), xytext=(-6, 23.6), arrowprops=dict(arrowstyle="<->", color=GREY, lw=0.6))
+    sx.text(-9, 14, "15-20", rotation=90, ha="right", va="center", fontsize=6, color=GREY)
+    sx.text(BOX_W / 2, 58, "side view (rods DCF77 / TDF end-on), ~53 mm inside", ha="center", fontsize=6.5, color=GREY)
+    sx.set_xlim(-25, BOX_W + 5); sx.set_ylim(-3, 66)
+    # compass: rod axes vs station bearings
+    cx = fig.add_axes([0.70, 0.50, 0.27, 0.36]); cx.set_aspect("equal"); cx.axis("off"); cx.set_xlim(-1.4, 1.4); cx.set_ylim(-1.4, 1.4)
     cx.add_patch(Circle((0, 0), 1, fill=False, ec=GREY, lw=0.8, ls=":"))
     for b, t in ((0, "N"), (90, "E"), (180, "S"), (270, "W")):
         cx.text(*(u(b) * 1.18), t, ha="center", va="center", fontsize=11, color=GREY, weight="bold")
-    for name, b, col in (("e-CzasPL 20 deg\nSolec Kujawski 234 km", 19.9, RED), ("DCF77 261 deg\nMainflingen 580 km", 261.0, BLUE),
-                         ("TDF 254 deg\nAllouis 1162 km", 253.7, GREEN)):
+    for name, b, col, off in (("e-CzasPL 20 deg", 19.9, RED, (0.25, 0.05)), ("DCF77 261 deg", 261.0, BLUE, (-0.05, 0.12)),
+                              ("TDF 254 deg", 253.7, GREEN, (0.0, -0.25))):
         cx.annotate("", xy=u(b) * 0.95, xytext=(0, 0), arrowprops=dict(arrowstyle="->", color=col, lw=1.6))
-        off = {19.9: (0.05, 0.12), 261.0: (-0.1, 0.12), 253.7: (0.0, -0.42)}[b]
         cx.text(*(u(b) * 0.62 + np.array(off)), name, ha="center", fontsize=6.5, color=col)
-    cx.set_title("station bearings from Wroclaw", fontsize=9, color=GREY)
+    for b, col in ((182, BLUE), (92, RED)):                                          # rod axes
+        cx.plot(*zip(-u(b) * 0.9, u(b) * 0.9), color=col, lw=5, alpha=0.25)
+    cx.set_title("station bearings (arrows) and rod axes (bars)", fontsize=8.5, color=GREY, pad=14)
     notes = [
-        "Each rod lies broadside to its station",
-        "  (axis perpendicular to the bearing):",
-        "  DCF77 axis ~171 deg, TDF ~164 deg (nearly",
-        "  parallel, side by side); e-CzasPL ~110 deg.",
-        "The head board sits in line with the DCF77 /",
-        "  TDF rod axes: a rod is deaf along its own",
-        "  axis (the null of its figure-8).",
-        "Tank (L1 + C + R, Q ~ 30) at each rod; amplifier",
-        "  (20-26 dB) + line driver in the module next",
-        "  to it; tune with the module connected",
-        "  (SPECTRUM hump on the station's frequency).",
-        "Install: turn the head so 'north' points north.",
+        "Rods at 90 deg: DCF77 + TDF parallel, e-CzasPL crosswise.",
+        "Box long side (DCF77 / TDF axis) to ~182 deg, i.e. ~north-south;",
+        "  each rod is then off its ideal (broadside) direction by",
+        "  DCF77 11, TDF 18, e-CzasPL 18 deg: at most -0.45 dB.",
+        "Board under the rods, rods on plastic standoffs 15-20 mm above it;",
+        "  no copper under the rods except narrow traces, ground plane only",
+        "  in the amp strip and the supply corner, no closed copper loops.",
+        "Tank (L1 + C + R, Q ~ 30) at each rod; tune in place with all",
+        "  three rods mounted and the lid on (SPECTRUM hump).",
+        "Rod spacing 45 mm (rods on different frequencies couple weakly):",
+        "  verify with the prototype (resonance with / without neighbours).",
+        "GPS: a separate active antenna (sky view) on its own coax.",
+        "150 mm rods: the same layout in a 1554X2GY (300 x 200 x 90).",
     ]
-    y = 0.42
-    for t in notes: fig.text(0.68, y, t, fontsize=7.8); y -= 0.026
-    fig.text(0.04, 0.015, "SQ6EMM / e-CzasPL receiver experiments, 30.09.2026 - dimensions are a proposal, verify with the prototype (frontend-architecture.md, 6)",
-             fontsize=7, color=GREY)
+    y = 0.46
+    for t in notes: fig.text(0.47, y, t, fontsize=7.8); y -= 0.026
+    fig.text(0.04, 0.015, "SQ6EMM / e-CzasPL receiver experiments, 30.09.2026 - a proposal, verify with the prototype (frontend-architecture.md, 6); "
+             "box inside dimensions from a distributor listing - check the Hammond drawing", fontsize=7, color=GREY)
     pdf.savefig(fig); fig.savefig("/o/antenna_head.png", dpi=110); plt.close(fig)
 
 
@@ -139,9 +150,9 @@ def page2(pdf):
     box(ax, 1.65, 0.45, 1.6, 0.4, "LDO (head supply)", ORANGE, fs=6.8, fc="#fff8e6")
     box(ax, 7.95, 0.45, 1.9, 0.4, "clean linear +5 V", ORANGE, fs=6.8, fc="#fff8e6")
     arrow(ax, 7.95, 0.65, 3.25, 0.65, ORANGE); ax.text(5.9, 0.72, "pair 4: +5 V / GND", ha="center", fontsize=6.5, color=ORANGE)
-    rows = [["pair", "variant A (three lines)", "variant B (one line + GPS in the head)"],
-            ["1", "DCF77", "three stations summed"], ["2", "TDF", "GPS PPS (RS-422)"],
-            ["3", "e-CzasPL", "GPS UART TX (RS-422)"], ["4", "+5 V / GND", "+5 V / GND"]]
+    rows = [["pair", "variant A (three lines)", "variant B (one summed line)"],
+            ["1", "DCF77", "three stations summed"], ["2", "TDF", "spare"],
+            ["3", "e-CzasPL", "spare"], ["4", "+5 V / GND", "+5 V / GND"]]
     tx = fig.add_axes([0.05, 0.1, 0.5, 0.26]); tx.axis("off")
     t = tx.table(cellText=rows[1:], colLabels=rows[0], loc="upper left", cellLoc="left", colWidths=[0.1, 0.35, 0.55])
     t.auto_set_font_size(False); t.set_fontsize(8.5); t.scale(1, 1.5)
@@ -156,6 +167,7 @@ def page2(pdf):
         "Variant B: one ADC input for all three stations (STM32H730),",
         "  separated by the firmware's digital mixers.",
         "ESD/TVS at both cable ends; common-mode rejection by the pairs.",
+        "GPS: separate active antenna, own coax to the main board.",
     ]
     y = 0.36
     for s in notes: fig.text(0.58, y, s, fontsize=8); y -= 0.03

@@ -33,6 +33,8 @@ its station: -6 dB. So: **a "V" / "L" layout, not a triangle** (drawing: `three_
 Rods to order (one type for all three, 10 x 150 mm, L1 = 500 uH + 7-turn link winding, tuned by
 capacitors at the rod), with a copy-and-paste manufacturer specification (English + Chinese), the
 capacitor / Q table and the acceptance checks: `rod-antenna-spec.md`.
+Head layout chosen on 30 Sep: rods at **90 deg** (DCF77 + TDF parallel, e-CzasPL crosswise, DCF77 / TDF
+axis ~182 deg: at most 18 deg off broadside, -0.45 dB), 10 x 100 mm rods in a Hammond 1554VAL2GY.
 Front end (rods + amplifiers in an antenna head, CAT6 to the main board, one-line option, GPS in the
 head): `frontend-architecture.md`.
 

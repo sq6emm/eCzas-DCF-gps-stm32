@@ -15,7 +15,7 @@ Quantity: 4 pcs (3 + 1 spare)
 Application: LF receiving antenna, 70-250 kHz (time signal reception)
 
 1. Ferrite rod
-   - Dimensions: diameter 10 mm, length 150 mm (tolerance +-0.3 mm / +-1 mm)
+   - Dimensions: diameter 10 mm, length 100 mm (tolerance +-0.3 mm / +-1 mm)
    - Material: EITHER NiZn ferrite, initial permeability 400-1000 (medium-wave antenna grade)
                OR MnZn ferrite, initial permeability 2000-2500 (e.g. PC40 / 2K grade)
      NOT acceptable: MnZn with initial permeability above 3000 (5K/10K grades);
@@ -25,7 +25,7 @@ Application: LF receiving antenna, 70-250 kHz (time signal reception)
 2. Main winding (L1)
    - Inductance: 500 uH +-10 %, measured at 100 kHz, 0.1-1 V, on the finished rod
    - Wire: litz wire (e.g. 20 x 0.05 mm or 40 x 0.07 mm)
-   - Single layer, centred on the rod, winding length approx. 40-60 mm
+   - Single layer, centred on the rod, winding length approx. 30-45 mm
    - Number of turns: as needed for 500 uH (please state it)
    - Unloaded Q: at least 60 at 100 kHz and at 200 kHz (please state the measured value)
    - Leads: 2 wires, at least 100 mm long, ends tinned, marked "L1 start" / "L1 end"
@@ -55,7 +55,7 @@ Application: LF receiving antenna, 70-250 kHz (time signal reception)
 用途: 长波接收天线, 70-250 kHz (授时信号接收)
 
 1. 铁氧体磁棒
-   - 尺寸: 直径 10 mm, 长度 150 mm (公差 +-0.3 mm / +-1 mm)
+   - 尺寸: 直径 10 mm, 长度 100 mm (公差 +-0.3 mm / +-1 mm)
    - 材料: 镍锌铁氧体, 初始磁导率 400-1000 (中波天线用材料)
            或 锰锌铁氧体, 初始磁导率 2000-2500 (例如 PC40 / 2K 材料)
      不可接受: 初始磁导率高于 3000 的锰锌材料 (5K/10K); 初始磁导率低于 200 的镍锌材料 (短波用)
@@ -64,7 +64,7 @@ Application: LF receiving antenna, 70-250 kHz (time signal reception)
 2. 主线圈 (L1)
    - 电感量: 500 uH +-10 %, 在成品磁棒上于 100 kHz, 0.1-1 V 测量
    - 线材: 多股利兹线 (例如 20 x 0.05 mm 或 40 x 0.07 mm)
-   - 单层绕制, 位于磁棒中部, 绕线长度约 40-60 mm
+   - 单层绕制, 位于磁棒中部, 绕线长度约 30-45 mm
    - 匝数: 按 500 uH 需要 (请注明)
    - 空载 Q 值: 在 100 kHz 和 200 kHz 时至少 60 (请注明实测值)
    - 引线: 2 根, 长度至少 100 mm, 线头镀锡, 标记 "L1 起" / "L1 末"
@@ -85,8 +85,10 @@ Application: LF receiving antenna, 70-250 kHz (time signal reception)
 ```
 (The Chinese text is our translation of the English above; if in doubt, the English is binding.)
 
-Length: 100-150 mm is fine (100 mm: ~-4.5 dB of signal, but the antenna noise stays ~10 dB above the ADC
-floor, so practically no SNR loss); not below ~80 mm. The inductance and the capacitors stay the same.
+Length: 100 mm (changed from 150 mm on 30 Sep so that three rods fit a Hammond 1554VAL2GY, see
+`frontend-architecture.md`): ~-4.5 dB of signal against 150 mm, but the antenna noise stays ~10 dB above
+the ADC floor, so practically no SNR loss; not below ~80 mm. 150 mm rods need the 1554X2GY (300 x 200 x 90).
+The inductance and the capacitors do not depend on the length.
 
 ## 2. Our part: tuning, Q, cable
 
@@ -111,7 +113,7 @@ noise floor without an amplifier; the planned front end has an amplifier at each
 
 Why the material hardly matters: for a 10 x 150 mm rod (length/diameter 15) the effective permeability
 is set by the geometry - about 75 for NiZn mu_i 400, about 90 for MnZn mu_i 2300 (demagnetisation
-estimate), i.e. ~1.5 dB; the same factor dilutes the material's temperature coefficient. What must be
+estimate), i.e. ~1.5 dB (10 x 100 mm: ~45 / ~49, even less); the same factor dilutes the material's temperature coefficient. What must be
 avoided: lossy very-high-mu MnZn (5K/10K) above ~100 kHz and low-mu shortwave NiZn.
 
 ## 3. Acceptance checks on arrival
@@ -125,7 +127,10 @@ avoided: lossy very-high-mu MnZn (5K/10K) above ~100 kHz and low-mu shortwave Ni
 
 ## 4. Mounting
 
-- DCF77 (bearing ~261 deg) and TDF (~254 deg) rods side by side, axis ~north-south (perpendicular to
-  the bearing); the e-CzasPL rod (bearing ~20 deg) turned ~90 deg to them (axis ~110/290 deg).
-- At least one rod length (150 mm) between rods; away from switch-mode supplies, the NUCLEO, computers.
+- DCF77 (bearing ~261 deg) and TDF (~254 deg) rods side by side, parallel; the e-CzasPL rod (bearing
+  ~20 deg) at 90 deg to them. With the DCF77 / TDF axis at ~182 deg each rod is off its broadside
+  direction by at most 18 deg (-0.45 dB) - see `frontend-architecture.md` (head layout, box) and
+  `antenna_head.pdf`.
+- Rods ~45 mm apart in the head (different frequencies: weak coupling; verify with the prototype);
+  the head away from switch-mode supplies, the NUCLEO, computers.
 - Optional: a slit copper-foil shield over the windings, grounded at one end only.

@@ -21,7 +21,7 @@ ANTENNA HEAD (plastic box, attic / roof / window)                   MAIN BOARD (
    -> differential line driver                                         clean linear supply for the head
  LDO supply (no switching regulator in the head)                       ESD/TVS at the cable entry
  ESD/TVS at the cable entry
- optional: GPS antenna ("mouse", >= 15 cm from every rod)
+ GPS: a separate active antenna with its own coax (section 4)
             ============ CAT5e/CAT6, twisted pairs, up to tens of metres ============
 ```
 
@@ -48,7 +48,7 @@ Amplifier per rod (guideline, parts to be chosen):
 CAT6, 4 twisted pairs, differential: rejects the interference picked up along the cable (common mode);
 cheap; the STM32's ADCs also take differential inputs.
 
-| pair | variant A: three lines | variant B: one line (see 3) + GPS in the head |
+| pair | variant A: three lines | variant B: one line (see 3) (+ GPS in the head, 4b) |
 |---|---|---|
 | 1 | DCF77 77.5 kHz | the three stations summed |
 | 2 | TDF 162 kHz | GPS PPS (RS-422) |
@@ -68,7 +68,12 @@ phase-locked digital mixers separate the stations as they do now. Then one 16-bi
 Cost: less flexibility (no per-station gain at the main board; one overloaded station affects all).
 Test first on the NUCLEO: two rods summed into A0.
 
-## 4. GPS in the head
+## 4. GPS
+
+Chosen (30 Sep): (a) - a separate active GPS antenna with sky view on its own coax to the GPS receiver on
+the main board; the head then needs no sky view and no 15 cm keep-out, and fits a small box (section 6).
+The options considered:
+
 
 GPS L1 (1575 MHz) and the rods (77-225 kHz) do not interfere, so a GPS antenna can share the head, with:
 - distance >= 15 cm from every rod: "mouse" antennas contain a magnet (shifts the ferrite's permeability)
@@ -92,11 +97,31 @@ continuous. Variant (a) keeps the GPS receiver's digital noise on the main board
 - STM32 (H730 with one line, H743 with three 16-bit lines), OCXO, GPS receiver (variant a), USB;
 - a clean linear +5 V for the head; ESD/TVS at the cable entry.
 
-## 6. Prototype test (before any PCB)
+## 6. Head layout and box
+
+Drawing to scale: `antenna_head.pdf`. Box: **Hammond 1554VAL2GY**, polycarbonate, IP68, UV-stable, 240 x 160
+x 60 mm outside, ~232 x 152 x 53 mm inside (distributor listing; check the Hammond drawing; lid-screw bosses
+in the corners). Rods 10 x 100 mm (`rod-antenna-spec.md`).
+
+- Rods at 90 deg: DCF77 + TDF parallel along the long side, ~45 mm apart; e-CzasPL crosswise below them.
+  Box long side to ~182 deg (~north-south): off broadside DCF77 11 deg, TDF 18 deg, e-CzasPL 18 deg - at
+  most -0.45 dB. (Exactly broadside would need ~60 deg between the rods; the 90 deg layout fits the box.)
+- The head board lies under the rods; the rods on plastic standoffs / clips 15-20 mm above it. No copper
+  under the rods except narrow traces; ground plane only in the amplifier strip and the supply corner; no
+  closed copper loops (a shorted turn near a rod lowers its sensitivity and Q).
+- Amplifier + C + R per rod next to the rod; LDO, TVS and the CAT6 gland in one corner.
+- Tune in place with all three rods mounted and the lid on.
+- 150 mm rods: the same layout in a 1554X2GY (300 x 200 x 90 mm).
+- Round boxes: no off-the-shelf round IP66/67 box of ~200 mm diameter found (round junction boxes are
+  smaller; antenna radomes are larger). A DIY option: PVC/KG pipe 200 mm with two end caps; a round box
+  also wastes space around three straight rods.
+
+## 7. Prototype test (before any PCB)
 
 When the rods arrive: a head on perfboard (3 rods, 3 op-amp stages, LDO, CAT6) connected to A0/A1 of the
 NUCLEO. The `SPECTRUM` lines (noise floor per band, every 10 min) show directly:
 1. each rod's resonance (the hump) at its station's frequency;
 2. the antenna noise above the ADC floor (the margin);
 3. the noise floor with the head at 0.1 / 1 / 5 m from the NUCLEO + OCXO (how far is far enough);
+   each rod's resonance and Q with and without the board / the neighbouring rods (layout of section 6);
 4. the one-line option: two rods summed into A0, each station's C/N0 against separate lines.
