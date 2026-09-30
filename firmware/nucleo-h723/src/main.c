@@ -33,6 +33,9 @@
 #include "dcf.h"
 #include "dcfbits.h"
 #include "efc.h"
+#ifndef EFC_DCF_CN0_MIN
+#define EFC_DCF_CN0_MIN 0.0f        /* DCF77 steers the OCXO only in minutes with at least this C/N0 [dB-Hz] */
+#endif
 #include "frame.h"
 #include "timekeeper.h"
 
@@ -964,8 +967,11 @@ int main(void)
                    its learned offset removed, weighted by the measured noise */
                 /* a station counts only after 2 whole minutes locked: the first minute after (re)lock still
                    holds the pull-in (e-CzasPL +30 ppb after the 20:28 reboot moved the OCXO by 1.8 us) */
+                /* and DCF77 only in minutes with C/N0 >= EFC_DCF_CN0_MIN: the rod's DCF77 stayed 'locked' at
+                   -14..0 dB-Hz (29/30 Sep nights) with minute errors of 6-20 ppb rms; from 0 dB-Hz up the
+                   minutes are noisier but unbiased (4-5 ppb rms at 0-3 dB-Hz), which the adaptive loop averages */
                 static int nd, ne;
-                nd = (rd2.state == COH_TRACK && dcf_verified()) ? nd + 1 : 0;
+                nd = (rd2.state == COH_TRACK && dcf_verified() && rd2.cn0_dbhz >= EFC_DCF_CN0_MIN) ? nd + 1 : 0;
                 ne = (re.state == COH_TRACK && re.err_deg < 25) ? ne + 1 : 0;
                 int vd = nd > 2, ve = ne > 2;
                 int src = efc_minute2(&efc, vd, rd2.freq_hz / F_DCF, ve, re.freq_hz / F_CARRIER, 60.0);

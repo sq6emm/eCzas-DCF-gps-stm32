@@ -3,7 +3,8 @@
 
   efc_replay_extract.py RX.LOG FROM_ISO TO_ISO > minutes.txt
 
-Each line: t vd yd ve ye code  (y as a fraction, y > 0 = the OCXO runs slow; code = logged EFC)
+Each line: t vd yd ve ye code cn0  (y as a fraction, y > 0 = the OCXO runs slow; code = logged EFC;
+  cn0 = DCF77 C/N0 of the minute in dB-Hz, -99 when not logged)
   ye from the e-CzasPL carrier phase (unwrapped, 0.001 cycle) over the minute,
   yd = ye - (e-CzasPL - DCF77) as logged (0.1 ppb); vd / ve = carrier locked.
 The measurements were taken with the OCXO as steered then; efcreplay removes that steering."""
@@ -18,7 +19,7 @@ for raw in open(log, "rb"):
     if not (t0 <= l[:19] < t1): continue
     m = O.match(l)
     if m and row:
-        print(*row, m.group(2)); row = None; continue
+        print(*row[:5], m.group(2), row[5]); row = None; continue
     m = C.match(l)
     if not m: continue
     t, fe, ph, le, fd, cn, ld, diff = m.groups()
@@ -26,7 +27,7 @@ for raw in open(log, "rb"):
     if prev is not None and le == "locked":
         ye = (ph - prev) / (F_E * 60.0)
         yd = ye - float(diff) * 1e-9
-        row = (t[:19], int(ld == "locked"), f"{yd:.4e}", int(le == "locked"), f"{ye:.4e}")
+        row = (t[:19], int(ld == "locked"), f"{yd:.4e}", int(le == "locked"), f"{ye:.4e}", cn if cn != "-" else "-99")
     else:
         row = None
     prev = ph if le == "locked" else None
