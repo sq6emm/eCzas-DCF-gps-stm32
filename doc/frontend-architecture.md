@@ -2,6 +2,7 @@
 
 Design direction after the NUCLEO tests (30 Sep 2026). Rods: `rod-antenna-spec.md`; stations and rod
 layout: `three-station-design.md`.
+Drawing (top view to scale + signal chain): `antenna_head.pdf` (source `antenna_head.py`).
 
 Why a separate antenna head: a ferrite rod is a magnetic-field antenna and picks up the currents on its
 own board - switch-mode regulators (100 kHz - 2 MHz), the OCXO heater (250-600 mA with regulation ripple),
