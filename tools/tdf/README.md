@@ -62,3 +62,27 @@ The second-start estimate moved 3 -> 7 -> 11 ms over the 2 h: the recording's cl
 against the nominal 48000, ~1 ms per 10-min file), not TDF. At this level the test proves the decoder on
 real ALS162 transmissions, not its weak-signal margin: for that see the noise bench above (0 % below
 ~20 dB-Hz); TDF on the existing NUCLEO rods was only 7-11 dB-Hz, so a 162 kHz rod is needed.
+
+## Second timing: TDF vs DCF77 vs e-CzasPL on one radio (30 Sep 2026, `tools/tdf_vs_eczas_timing.py`)
+
+Both IC-7610 receivers in the same stereo file (one sample clock). Seconds found by model fits on the raw
+carrier phase: TDF = zero crossing of the first triangular element (the ALS162 definition of the UTC
+second, 50 ms after the element start; per-second scatter 70-90 us); DCF77 = phase-code start - 200 ms
+(quadrature against a 1-s carrier reference; 115-160 us by day); e-CzasPL = frame start from the ideal
+frame of the decoded N (0.2 ms per frame). Radio MAIN - SUB delay with both on 226.000 for 10 min:
+0.00 +- 0.05 ms (IF and envelope cross-correlation, frame fits).
+
+| arrival at Wroclaw | result | when |
+|---|---|---|
+| e-CzasPL - DCF77 | +16.61 ms (steady files +-0.1) | 16:00-17:30 UTC, day |
+| e-CzasPL - TDF | +16.48 ms (11 files, spread 0.13) | 19:10-21:00 UTC, night |
+| TDF - DCF77 direct (MAIN DCF77, SUB TDF) | -0.10 / -3.05 ms | 22:17-22:28 UTC, night: DCF77 unsteady |
+| TDF - DCF77 from the two above | +0.14 ms | |
+
+At night the DCF77 timing on this radio moves by several ms (evening files +12.4 ... +20.7 against
++16.6 by day, sky wave); TDF at night and DCF77 by day are steady. With ground-wave delays (DCF77 580 km
+1.93 ms, TDF 1162 km 3.87 ms, e-CzasPL 234 km 0.78 ms) e-CzasPL's second leaves ~15.5 ms after DCF77's and
+~13.4 ms after TDF's; the ~2 ms between those two is within what the path assumptions (night sky wave for
+TDF) and the conventions allow, but not below. NOTE: the NUCLEO reports e-CzasPL - DCF77 = +8.9 ms at the
+board - 7.7 ms less than this; one of the NUCLEO's chains (ecz.c / eCzas core or dcf.c) has an
+uncompensated delay; the GPS PPS test measures each against GPS separately.
