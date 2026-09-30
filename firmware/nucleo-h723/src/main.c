@@ -536,9 +536,9 @@ static void spec_report(void)
     static const struct { int ch; const char *name; double f0, f1, step; } R[2] = {
         { 1, "A1 (DCF77 rod)", 40e3, 120e3, 2e3 }, { 0, "A0 (e-CzasPL rod)", 150e3, 300e3, 3e3 } };
     double fs = FS_NOM_HZ * cur_tps_ratio, df = fs / SPEC_N;       /* true Hz per bin */
-    char m[480], b1[16];
+    char m[480], b1[16], b2[16];                /* newlib-nano printf has no %f: f1() */
     for (int r = 0; r < 2; r++) {
-        int o = snprintf(m, sizeof m, "%s noise dB/Hz per %.0f kHz from %.0f kHz:", R[r].name, R[r].step / 1e3, R[r].f0 / 1e3);
+        int o = snprintf(m, sizeof m, "%s noise dB/Hz per %d kHz from %d kHz:", R[r].name, (int)(R[r].step / 1e3), (int)(R[r].f0 / 1e3));
         for (double f = R[r].f0; f < R[r].f1 - 1 && o < (int)sizeof m - 8; f += R[r].step) {
             float v[64]; int n = 0;
             for (int k = (int)ceil(f / df); k * df < f + R[r].step && k <= SPEC_N / 2 && n < 64; k++) v[n++] = (float)spec_psd(&spec, R[r].ch, k, fs);
@@ -561,7 +561,7 @@ static void spec_report(void)
             for (int i = w; i > 0 && pp[i] > pp[i - 1]; i--) { double t = pp[i]; pp[i] = pp[i - 1]; pp[i - 1] = t; int u = pk[i]; pk[i] = pk[i - 1]; pk[i - 1] = u; }
         }
         o = snprintf(m, sizeof m, "%s carriers (kHz: dB re 1 LSB^2, %d FFTs):", R[r].name, spec.nblk);
-        for (int i = 0; i < np; i++) o += snprintf(m + o, sizeof m - o, " %.1f: %s", pk[i] * df / 1e3, f1(b1, 10 * log10(pp[i]), 0));
+        for (int i = 0; i < np; i++) o += snprintf(m + o, sizeof m - o, " %s: %s", f1(b2, pk[i] * df / 1e3, 0), f1(b1, 10 * log10(pp[i]), 0));
         if (!np) snprintf(m + o, sizeof m - o, " none 15 dB over the noise");
         put_line("SPECTRUM", m);
     }
