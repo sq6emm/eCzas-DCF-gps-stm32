@@ -8,6 +8,10 @@
  *     -n SNR    add white noise relative to the input RMS (as sim.c)
  *     -r T0 N0  truth: the frame starting at T0 s is number N0 (wrong times are counted)
  *     -b BW     tracking loop bandwidth [Hz] (default 1)
+ *   cohsim -c [-n SNR_dB] ... file.c64
+ *     file.c64  the NUCLEO's own e-CzasPL dump (2 kHz complex float32 mixer output, ecz_*.c64): fed to
+ *               the tracker as it is, the firmware's chain exactly (-n: complex noise relative to |z| rms)
+ * Per decoded frame (not -q): "t=<s from the start> N=<n3>" with the core's frame start time.
  * The input is turned into the chip's 2 kHz complex baseband (mix by 1 kHz, sum over 0.5 ms).
  */
 #include <math.h>
@@ -57,7 +61,7 @@ static int confirm(ecz_t *ez, tk_t *tk, const frame_info_t *last, int64_t tick,
 int main(int argc, char **argv)
 {
     static coh_trk_t trk; static ecz_t ez; tk_t tk;
-    int fs_in = 10000, quiet = 0, a; double snr = 1e9, bw = 1.0, rms = 0, ref_t0 = -1; uint32_t ref_n0 = 0;
+    int fs_in = 10000, quiet = 0, c64 = 0, a; double snr = 1e9, bw = 1.0, rms = 0, ref_t0 = -1; uint32_t ref_n0 = 0;
     const char *path = NULL; FILE *f; long n = 0, cap = 1 << 20, i; int16_t *x;
     int n_cand = 0, n_ok = 0, n_nottime = 0, n_fail = 0, n_tk[5] = { 0 }, clock_wrong = 0, n_conf = 0, conf_wrong = 0, cr;
     int n_presync = 0, have_last = 0, ever = 0, n_unl = 0; long unl = 0, run = 0, maxrun = 0;
@@ -70,23 +74,40 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[a], "-r")) { ref_t0 = atof(argv[++a]); ref_n0 = (uint32_t)atol(argv[++a]); }
         else if (!strcmp(argv[a], "-b")) bw = atof(argv[++a]);
         else if (!strcmp(argv[a], "-q")) quiet = 1;
+        else if (!strcmp(argv[a], "-c")) c64 = 1;
         else path = argv[a];
     }
     if (!path || !(f = fopen(path, "rb"))) { fprintf(stderr, "usage: cohsim [-8] [-n snr] file.raw\n"); return 2; }
+    float *zc = NULL;
+    if (c64) {                                      /* 2 kHz complex: n = complex samples */
+        zc = malloc(cap * 2 * sizeof *zc);
+        while (fread(&zc[2 * n], sizeof(float), 2, f) == 2) {
+            rms += (double)zc[2 * n] * zc[2 * n] + (double)zc[2 * n + 1] * zc[2 * n + 1];
+            if (++n == cap) { cap *= 2; zc = realloc(zc, cap * 2 * sizeof *zc); }
+        }
+        fclose(f); rms = sqrt(rms / n); x = NULL;
+    } else {
     x = malloc(cap * sizeof *x);
     while (fread(&x[n], 2, 1, f) == 1) { rms += (double)x[n] * x[n]; if (++n == cap) { cap *= 2; x = realloc(x, cap * sizeof *x); } }
     fclose(f); rms = sqrt(rms / n);
+    }
 
     coh_cfg_t cfg = { COH_ECZAS, 4, 3.0f, (float)bw, 1500, 4, 1024, 40.0f, 25.0f, 30.0f };
     coh_init(&trk, &cfg); ecz_init(&ez); tk_init(&tk);
     int dec = fs_in / 2000; float sr = 0, si = 0; int k = 0; long n2k = 0;
     for (i = 0; i < n; i++) {
+        if (c64) {
+            sr = zc[2 * i]; si = zc[2 * i + 1];
+            if (snr < 1e8) { double s = rms / pow(10, snr / 20) / sqrt(2.0); sr += (float)(grand() * s); si += (float)(grand() * s); }
+            n2k++;
+        } else {
         double v = x[i];
         if (snr < 1e8) v += grand() * rms / pow(10, snr / 20);
         double ph = 2 * M_PI * 1000.0 * i / fs_in;
         sr += (float)(v * cos(ph)); si -= (float)(v * sin(ph));
         if (++k < dec) continue;
         k = 0; n2k++;
+        }
         float dr, di, ir, ii;
         if (coh_push(&trk, sr, si, &dr, &di, &ir, &ii)) {
             ecz_push(&ez, (int16_t)lrintf(atan2f(ii, ir) * (32768.0f / (float)M_PI)));
@@ -131,6 +152,6 @@ int main(int argc, char **argv)
            snr, n_cand, n_ok, n_nottime, n_fail, n_tk[0], n_tk[1], n_tk[2], n_tk[3], n_tk[4],
            n_err ? sqrt(sum_err2 / n_err - (sum_err / n_err) * (sum_err / n_err)) : 0.0, n_err ? sum_err / n_err : 0.0,
            tk_rate_ppb(&tk), first_sync, clock_wrong, n_conf, conf_wrong, n_presync);
-    free(x);
+    free(x); free(zc);
     return 0;
 }
