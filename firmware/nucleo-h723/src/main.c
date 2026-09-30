@@ -33,6 +33,7 @@
 #include "dcf.h"
 #include "dcfbits.h"
 #include "efc.h"
+#include "spec.h"
 #ifndef EFC_DCF_CN0_MIN
 #define EFC_DCF_CN0_MIN 0.0f        /* DCF77 steers the OCXO only in minutes with at least this C/N0 [dB-Hz] */
 #endif
@@ -518,6 +519,53 @@ static int64_t now_tick(void);
    at every correctly decoded frame / minute; LD3 OCXO - on = locked, 1 Hz blink = calibrating,
    moving to the calibrated code or holdover, off = waiting or failed (non-OCXO build: off) */
 static uint64_t led1_until, led2_until;    /* n2k at which the LD1 / LD2 blink ends */
+/* spectrum diagnostic (common/spec.c): 60 s after boot and then every 10 min, 256 FFTs of 4096 samples of
+   both inputs (every 4th block, ~5 s), then per input the noise floor (median PSD per band, so the carriers
+   of other stations do not lift it: the tuned rod's resonance shows as a hump) and the strongest carriers.
+   A0: 150-300 kHz in 3 kHz bands; A1: 40-120 kHz in 2 kHz bands; dB re 1 LSB^2/Hz (ADC floor ~ -50) */
+#define SPEC_BLOCKS 256
+static spec_t spec __attribute__((section(".dtcm")));
+static uint64_t next_spec = 120000; static int spec_left, spec_ctr;
+static float spec_med(float *v, int n)
+{
+    for (int i = 1; i < n; i++) { float x = v[i]; int j = i - 1; while (j >= 0 && v[j] > x) { v[j + 1] = v[j]; j--; } v[j + 1] = x; }
+    return n ? (n & 1 ? v[n / 2] : 0.5f * (v[n / 2 - 1] + v[n / 2])) : 0;
+}
+static void spec_report(void)
+{
+    static const struct { int ch; const char *name; double f0, f1, step; } R[2] = {
+        { 1, "A1 (DCF77 rod)", 40e3, 120e3, 2e3 }, { 0, "A0 (e-CzasPL rod)", 150e3, 300e3, 3e3 } };
+    double fs = FS_NOM_HZ * cur_tps_ratio, df = fs / SPEC_N;       /* true Hz per bin */
+    char m[480], b1[16];
+    for (int r = 0; r < 2; r++) {
+        int o = snprintf(m, sizeof m, "%s noise dB/Hz per %.0f kHz from %.0f kHz:", R[r].name, R[r].step / 1e3, R[r].f0 / 1e3);
+        for (double f = R[r].f0; f < R[r].f1 - 1 && o < (int)sizeof m - 8; f += R[r].step) {
+            float v[64]; int n = 0;
+            for (int k = (int)ceil(f / df); k * df < f + R[r].step && k <= SPEC_N / 2 && n < 64; k++) v[n++] = (float)spec_psd(&spec, R[r].ch, k, fs);
+            o += snprintf(m + o, sizeof m - o, " %s", f1(b1, 10 * log10(spec_med(v, n) + 1e-30), 0));
+        }
+        put_line("SPECTRUM", m);
+        /* carriers: local maxima 15 dB over the median of +-20 bins, the 8 strongest */
+        int pk[8] = {0}; double pp[8] = {0}; int np = 0;
+        int k0 = (int)(R[r].f0 / df) + 21, k1 = (int)(R[r].f1 / df) - 21;
+        for (int k = k0; k <= k1; k++) {
+            const float *a = R[r].ch ? spec.acc1 : spec.acc0;
+            if (a[k] < a[k - 1] || a[k] < a[k + 1]) continue;
+            float v[41]; for (int i = 0; i < 41; i++) v[i] = a[k - 20 + i];
+            float md = spec_med(v, 41);
+            if (a[k] < 31.6f * md) continue;
+            double tp = spec_tone(&spec, R[r].ch, k);
+            int w = np < 8 ? np++ : 7;
+            if (w == 7 && np == 8 && tp <= pp[7]) continue;
+            pk[w] = k; pp[w] = tp;
+            for (int i = w; i > 0 && pp[i] > pp[i - 1]; i--) { double t = pp[i]; pp[i] = pp[i - 1]; pp[i - 1] = t; int u = pk[i]; pk[i] = pk[i - 1]; pk[i - 1] = u; }
+        }
+        o = snprintf(m, sizeof m, "%s carriers (kHz: dB re 1 LSB^2, %d FFTs):", R[r].name, spec.nblk);
+        for (int i = 0; i < np; i++) o += snprintf(m + o, sizeof m - o, " %.1f: %s", pk[i] * df / 1e3, f1(b1, 10 * log10(pp[i]), 0));
+        if (!np) snprintf(m + o, sizeof m - o, " none 15 dB over the noise");
+        put_line("SPECTRUM", m);
+    }
+}
 #define LED_BLINK 600                      /* 2 kHz samples = 300 ms */
 /* one line per decoded DCF77 minute; the e-CzasPL time is only compared, never used */
 static void dcf_time_report(void)
@@ -798,6 +846,7 @@ int main(void)
 #endif
     }
     ecz_init(&ez);
+    spec_init();
     dcf_init(&dcf); dcfbits_init(&dcfb);
     tk_init(&tk);
 #ifdef OCXO_REF
@@ -876,6 +925,11 @@ int main(void)
             pl_ok = 1;
         }
         process_block(b, mean, mean2);
+        if (!spec_left && n2k >= next_spec) { spec_clear(&spec); spec_left = SPEC_BLOCKS; spec_ctr = 0; next_spec += 1200000; }
+        if (spec_left && (++spec_ctr & 3) == 0 && --spec_left >= 0) {   /* every 4th block: ~1 ms per FFT */
+            spec_add(&spec, b, mean, mean2);
+            if (!spec_left) spec_report();
+        }
 #ifdef OCXO_REF
         {   /* GPS PPS: convert to true time at once - the capture ring (CAPR) holds only ~128 ms */
             static uint32_t conv;

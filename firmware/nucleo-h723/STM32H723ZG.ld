@@ -1,4 +1,4 @@
-/* STM32H723ZG: 1 MB flash, DTCM 128 KB (stack), AXI SRAM 320 KB (data, bss, DMA buffers) */
+/* STM32H723ZG: 1 MB flash, DTCM 128 KB (CPU-only buffers from the bottom, stack from the top), AXI SRAM 320 KB (data, bss, DMA buffers) */
 ENTRY(Reset_Handler)
 _estack = ORIGIN(DTCMRAM) + LENGTH(DTCMRAM);
 _Min_Heap_Size = 0x0;
@@ -24,6 +24,9 @@ SECTIONS
   _sidata = LOADADDR(.data);
   .data : { . = ALIGN(4); _sdata = .; *(.data) *(.data*) . = ALIGN(4); _edata = .; } >RAM_D1 AT> FLASH
   .bss : { . = ALIGN(4); _sbss = .; __bss_start__ = _sbss; *(.bss) *(.bss*) *(COMMON) . = ALIGN(4); _ebss = .; __bss_end__ = _ebss; } >RAM_D1
+  /* CPU-only buffers (not reachable by DMA1/2): the spectrum diagnostic (common/spec.c); not zeroed at boot */
+  .dtcm (NOLOAD) : { . = ALIGN(8); _sdtcm = .; *(.dtcm) *(.dtcm*) . = ALIGN(8); _edtcm = .; } >DTCMRAM
+  ASSERT(_estack - _edtcm >= 32K, "DTCM: less than 32 KB left for the stack")
   ._user_heap_stack : { . = ALIGN(8); PROVIDE ( end = . ); PROVIDE ( _end = . ); . = . + _Min_Heap_Size; . = ALIGN(8); } >RAM_D1
   /DISCARD/ : { libc.a ( * ) libm.a ( * ) libgcc.a ( * ) }
   .ARM.attributes 0 : { *(.ARM.attributes) }
