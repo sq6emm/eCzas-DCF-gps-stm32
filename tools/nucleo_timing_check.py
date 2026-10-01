@@ -71,8 +71,8 @@ print(f"e-CzasPL raw fit ({len(raws)} frames): second at {np.median(raws):.2f} m
 # raw DCF77: phase code
 ref1 = np.convolve(zd, np.ones(FS) / FS, mode="same")
 q = np.imag(zd * np.conj(ref1)) / (np.abs(ref1) ** 2 + 1e-30)
-sr, b1, prn = 0, 1, []
-for _ in range(512):
+sr, b1, prn = 0, 1, [0]  # PTB chip 0 is 0 (sequence 00000100011...); the register gives chips 1-511
+for _ in range(511):
     sr = ((sr << 1) | b1) & 0x1FF; b1 = ((sr >> 4) & 1) ^ ((sr >> 8) & 1); prn.append(b1)
 prn = 1.0 - 2.0 * np.array(prn); L = int(0.8 * FS); chip = 120.0 / 77500.0
 def model(o):

@@ -71,8 +71,8 @@ def tdf_seconds(z):
 
 
 def dcf_prn():
-    sr, b1, prn = 0, 1, []
-    for _ in range(512):
+    sr, b1, prn = 0, 1, [0]  # PTB chip 0 is 0 (sequence 00000100011...); the register gives chips 1-511
+    for _ in range(511):
         sr = ((sr << 1) | b1) & 0x1FF
         b1 = ((sr >> 4) & 1) ^ ((sr >> 8) & 1)
         prn.append(b1)

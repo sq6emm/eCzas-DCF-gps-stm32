@@ -55,8 +55,8 @@ print("  best candidate around its peak, 0.5 ms steps:", " ".join(f"{v/sigma:+.1
 # Diplomarbeit HS Mittweida, Anlage 2): 9-stage register from state 0, a 1 shifted in
 # first (start flip-flop), chip = stage5 XOR stage9, fed back; restarted 200 ms into the second.
 def dcf77_prn():
-    sr, b1, out = 0, 1, []
-    for _ in range(512):
+    sr, b1, out = 0, 1, [0]  # PTB chip 0 is 0 (sequence 00000100011...); the register gives chips 1-511
+    for _ in range(511):
         sr = ((sr << 1) | b1) & 0x1FF
         b1 = ((sr >> 4) & 1) ^ ((sr >> 8) & 1)
         out.append(b1)

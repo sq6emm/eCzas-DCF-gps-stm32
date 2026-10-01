@@ -15,7 +15,11 @@ uint8_t dcf_prn_bits[512];                  /* the PTB sequence (also used by dc
 static void build(void)
 {
     int sr = 0, b1 = 1, k, t, n = 0; uint8_t *prn = dcf_prn_bits; float m = 0, e = 0;
-    for (k = 0; k < 512; k++) {             /* 9-stage register from 0, a 1 shifted in first */
+    /* PTB's sequence begins 00000100011000010011100101010110000... (chip 0 = 0); the register
+       below yields it from chip 1 on. Without the leading 0 every phase-code time came out one
+       chip (120 cycles = 1.548 ms) late - found 1 Oct 2026 against a GPS PPS */
+    prn[0] = 0;
+    for (k = 1; k < 512; k++) {             /* 9-stage register from 0, a 1 shifted in first */
         sr = ((sr << 1) | b1) & 0x1FF;
         b1 = ((sr >> 4) & 1) ^ ((sr >> 8) & 1);
         prn[k] = (uint8_t)b1;

@@ -18,8 +18,8 @@ LAG_C, LAG_W = -8.5e-3, 15e-3                      # search window around the kn
 def iso(u): return dt.datetime.fromtimestamp(u, dt.timezone.utc).strftime("%Y-%m-%d %H:%M")
 
 def prn():
-    sr, b1, out = 0, 1, []
-    for _ in range(512):
+    sr, b1, out = 0, 1, [0]  # PTB chip 0 is 0 (sequence 00000100011...); the register gives chips 1-511
+    for _ in range(511):
         sr = ((sr << 1) | b1) & 0x1FF
         b1 = ((sr >> 4) & 1) ^ ((sr >> 8) & 1)
         out.append(b1)
