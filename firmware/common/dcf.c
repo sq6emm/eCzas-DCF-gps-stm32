@@ -140,6 +140,14 @@ static void mark_coarse(markbuf_t *mb, const float *yr, int m0, int m1)
     }
 }
 
+static float mark_frac_last;             /* parabolic sub-sample offset of the last mark_finish */
+static float mark_score(const markbuf_t *mb, int m)
+{
+    const float *y = mb->y2 + (m + DCF_SPS) % DCF_SPS; float s = 0; int k;
+    for (k = 0; k < DCF_SPS; k++) s += y[k] * T[k];
+    return s;
+}
+
 static int mark_finish(markbuf_t *mb, float *sigma)
 {
     float med, sg, *sc = mb->sc; int m, k, best = 0;
@@ -159,6 +167,11 @@ static int mark_finish(markbuf_t *mb, float *sigma)
         float s = 0; const float *y = mb->y2 + best;
         for (k = 0; k < DCF_SPS; k++) s += y[k] * T[k];
         *sigma = (s - med) / sg;
+        {   /* sub-sample position: parabola through the neighbours (the mark itself stays an integer) */
+            float sm = mark_score(mb, best - 1), sp = mark_score(mb, best + 1), den = sm - 2 * s + sp;
+            float f = den < 0 ? 0.5f * (sm - sp) / den : 0.0f;
+            mark_frac_last = f > 0.5f ? 0.5f : f < -0.5f ? -0.5f : f;
+        }
     }
     return best;
 }
@@ -177,7 +190,7 @@ int dcf_quick_mark(dcf_t *d, float min_sigma)
     for (k = 0; k < DCF_SPS; k++) t[k] = d->yf[k] / (d->nsec * d->amp);
     best = mark_find(&mb_quick, t, &s);
     if (s < min_sigma) return 0;
-    d->mark = best; d->mark_sigma = s; d->have_mark = 1;
+    d->mark = best; d->mark_frac = mark_frac_last; d->mark_sigma = s; d->have_mark = 1;
     return 1;
 }
 
@@ -284,7 +297,7 @@ static void block_mark(dcf_t *d, int best)
             memset(d->dip, 0, sizeof d->dip); memset(d->dipn, 0, sizeof d->dipn);
             d->have_minute = 0; d->pm_ref = -1;
         }
-        d->mark = best; d->have_mark = 1;
+        d->mark = best; d->mark_frac = mark_frac_last; d->have_mark = 1;
     }
 }
 

@@ -5,8 +5,8 @@ Where the NUCLEO's seconds sit, checked against model fits on its own mixer outp
   nucleo_timing_check.py LOGDIR STAMP        (e.g. /n/log 20260930_140019: ecz_/dcf_STAMP.c64 + .idx.csv, rx.log)
 
 Both dumps are on the same 2 kHz sample index (n2k). Per 10-min block:
- e-CzasPL: raw = frame starts from a fit of the ideal frame (N from the FRAME lines, eczas_codec.make_frame)
-           to the unwrapped carrier phase; firmware = the eCzas core's second boundary from the TIMEMAP lines
+ e-CzasPL: raw = frame starts (ramp START of the first bit change, 16.6 ms ramp model, tools/timing_models.py,
+           bias-free since 1 Oct 2026) from a fit of the ideal frame (N from the FRAME lines) to the phase; firmware = the eCzas core's second boundary from the TIMEMAP lines
            (sample n = eCzas time t -> boundary at n - frac(t) * 2000).
  DCF77:    raw = phase-code start - 200 ms from a fit of the PTB chip sequence to the quadrature component
            (as tools/tdf_vs_eczas_timing.py); firmware = second mark + phase-code lag from the DCF77 lines.
@@ -14,6 +14,7 @@ All as ms of the n2k second (n2k mod 2000 / 2). The chain whose firmware value i
 """
 import sys, re, glob, datetime as dt, numpy as np
 sys.path.insert(0, "/codec"); from eczas_codec import make_frame
+import os; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import timing_models as tm
 D, ST = sys.argv[1], sys.argv[2]
 FS = 2000
 EPOCH = dt.datetime(2000, 1, 1, tzinfo=dt.timezone.utc)
@@ -53,18 +54,18 @@ for s in sorted(set(fr)):
     n_est = ref[0] + ((ts - EPOCH).total_seconds() + 946684800 - ref[1]) * FS - ne0   # index in ze (core's clock)
     a, b = int(n_est - 0.2 * FS), int(n_est + 2.2 * FS)
     if a < 0 or b > len(ph): continue
-    seg = ph[a:b]; tt = np.arange(a, b) / FS
+    seg = ph[a:b]; tt = (np.arange(a, b) + 0.5) / FS       # 0.5 ms sums: sample n covers [n, n+1) / FS
     seg = seg - np.polyval(np.polyfit(tt, seg, 1), tt)
     bits = np.array(make_frame(N, 2), float) * 2 - 1
-    def score(T):
-        idx = np.floor((tt - T) / 0.020).astype(int)
-        m = np.where((idx >= 0) & (idx < 96), bits[np.clip(idx, 0, 95)], 0.0)
-        m = m - m[m != 0].mean() * (m != 0)
+    def score(T):                                          # 16.6 ms ramps STARTING at the bit edges
+        m, mk = tm.eczas_phase(tt, T, bits)
+        m = (m - m[mk].mean()) * mk
         return float(np.dot(seg, m))
     c0 = n_est / FS
     cand = np.arange(-0.1, 0.1001, 0.0005); s1 = np.array([score(c0 + c) for c in cand]); j = int(np.argmax(np.abs(s1)))
-    fine = np.arange(cand[j] - 0.0005, cand[j] + 0.00051, 0.00005); s2 = np.array([score(c0 + c) for c in fine])
-    T = c0 + fine[int(np.argmax(np.abs(s2)))]
+    fine = np.arange(cand[j] - 0.0006, cand[j] + 0.00061, 0.00005); f = tm.refine(np.array([score(c0 + c) for c in fine]), fine)
+    if f is None: continue
+    T = c0 + f                                             # ramp start = the second
     raws.append(((T * FS + ne0) % FS) / 2)
 raws = np.array(raws)
 print(f"e-CzasPL raw fit ({len(raws)} frames): second at {np.median(raws):.2f} ms of the n2k second (sd {np.std(raws):.2f})")
@@ -75,9 +76,9 @@ sr, b1, prn = 0, 1, [0]  # PTB chip 0 is 0 (sequence 00000100011...); the regist
 for _ in range(511):
     sr = ((sr << 1) | b1) & 0x1FF; b1 = ((sr >> 4) & 1) ^ ((sr >> 8) & 1); prn.append(b1)
 prn = 1.0 - 2.0 * np.array(prn); L = int(0.8 * FS); chip = 120.0 / 77500.0
-def model(o):
-    t = np.arange(L) / FS - o; c = np.floor(t / chip).astype(int)
-    return np.where((c >= 0) & (c < 512), prn[np.clip(c, 0, 511)], 0.0)
+_t0, _t1 = tm.intervals(np.arange(L), FS, box=True)
+def model(o):                                              # interval averages: continuous in o
+    return tm.dcf_code(_t0, _t1, o, (1.0 - prn) / 2)
 m0 = model(0); m0 -= m0.mean(); n = len(q) // FS; acc = np.zeros(FS)
 for s in range(n - 1):
     seg = q[s * FS: s * FS + FS + L]; seg = seg - seg.mean()
@@ -89,8 +90,8 @@ for s in range(n - 1):
     a = s * FS + i0; seg = q[a:a + L]
     if len(seg) < L: break
     seg = seg - np.polyval(np.polyfit(np.arange(L), seg, 1), np.arange(L))
-    sc = np.abs(M @ seg); j = int(np.argmax(sc))
-    if 0 < j < len(offs) - 1: sec.append((((a + nd0) / FS + offs[j] - 0.2) * 1000) % 1000)
+    sc = np.abs(M @ seg); o = tm.refine(sc, offs)
+    if o is not None: sec.append((((a + nd0) / FS + o - 0.2) * 1000) % 1000)
 sec = np.array(sec)
 print(f"DCF77 raw phase-code fit ({len(sec)} s, peak/median {acc[i0] / np.median(acc):.1f}): second at {np.median(sec):.2f} ms of the n2k second (sd {np.std(sec):.2f})")
 for mk, pm, sg in dl:

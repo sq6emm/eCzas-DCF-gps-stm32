@@ -14,15 +14,18 @@ TDF: every second begins with a triangular phase element (+1 rad in 25 ms, -2 ra
 DCF77: the phase code (512 chips of 120 carrier cycles = 1.548 ms, the PTB sequence as in dcf.c) starts
 200 ms after the second; per second the fit of |correlation| (the data bit inverts the sequence) of the
 carrier phase with the chip sequence, tau on a 0.05 ms grid -> second = code start - 200 ms.
-e-CzasPL: every regular time frame the processor decoded: the ideal frame from its N (make_frame), bits
-as +-1 phase levels of 20 ms from the frame start; fit of the start (0.05 ms grid) to the carrier phase
-with a linear trend removed -> the slot's start.
+e-CzasPL: every regular time frame the processor decoded: the ideal frame from its N (make_frame), each bit
+change a 16.6 ms linear phase ramp STARTING at the bit edge (measured shape); fit of the start to the
+carrier phase with a linear trend removed -> the slot's start = the ramp start (GUM: 'transmission starts at
+the beginning of the second'). Since 1 Oct 2026 (review): continuous models (tools/timing_models.py),
+parabolic peak interpolation; the old step-model fit marked the ramp MIDDLE with a -0.2 ms bias.
 Output per file: e-CzasPL second - SUB second (ms, mod 1 s); positive = e-CzasPL's second comes later.
 The --dcf run checks the method against the NUCLEO (DCF77 second ~8.9 ms before e-CzasPL's at the board):
 any difference is the method's / the radio's MAIN-SUB offset and is to be removed from the TDF result.
 """
 import sys, os, csv, datetime as dt, numpy as np, scipy.io.wavfile as wf, scipy.signal as ss
 sys.path.insert(0, "/codec"); from eczas_codec import make_frame
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import timing_models as tm
 
 DCF = sys.argv[1] == "--dcf"
 DT = sys.argv[1] == "--dcf-tdf"
@@ -64,9 +67,9 @@ def tdf_seconds(z):
         seg = z[c0: c0 + len(k)]
         if len(seg) < len(k): break
         sc = np.abs(M.conj() @ seg)
-        j = int(np.argmax(sc))
-        if 0 < j < len(taus) - 1 and sc[j] > 0.5 * np.abs(seg).sum():         # minute-marker second: no element
-            out.append((c0 - k[0]) / FS2 + taus[j] / 1000.0 + 0.050)       # zero crossing = UTC second
+        tau = tm.refine(sc, taus)                    # continuous model; parabolic peak (review 1 Oct)
+        if tau is not None and sc.max() > 0.5 * np.abs(seg).sum():         # minute-marker second: no element
+            out.append((c0 - k[0]) / FS2 + tau / 1000.0 + 0.050)           # zero crossing = UTC second
     return np.array(out)
 
 
@@ -84,14 +87,12 @@ def dcf_seconds(z):
     # does with the tracked carrier); the unwrapped phase wanders too much at ~25 dB-Hz: no correlation
     ref = np.convolve(z, np.ones(FS2) / FS2, mode="same")
     ph = np.imag(z * np.conj(ref)) / (np.abs(ref) ** 2 + 1e-30)
-    chip = 120.0 / 77500.0
-    prn = 1.0 - 2.0 * dcf_prn()
+    prn = dcf_prn()
     n = len(ph) // FS2
     L = int(0.800 * FS2)
-    def model(off_s):                                # code over 0..800 ms from the code start + off_s
-        t = np.arange(L) / FS2 - off_s
-        c = np.floor(t / chip).astype(int)
-        return np.where((c >= 0) & (c < 512), prn[np.clip(c, 0, 511)], 0.0)
+    t0, t1 = tm.intervals(np.arange(L), FS2, box=False)   # point samples (zero-phase FIR)
+    def model(off_s):                                # code over 0..800 ms from the code start + off_s,
+        return tm.dcf_code(t0, t1, off_s, prn)       # each sample = average over its interval (no plateaus)
     m0 = model(0.0); m0 = m0 - m0.mean()
     acc = np.zeros(FS2)
     for s in range(n - 1):                           # coarse: fold |corr| over the file
@@ -108,9 +109,9 @@ def dcf_seconds(z):
         if len(seg) < L: break
         seg = seg - np.polyval(np.polyfit(np.arange(L), seg, 1), np.arange(L))
         sc = np.abs(M @ seg)
-        j = int(np.argmax(sc))
-        if 0 < j < len(offs) - 1:
-            out.append(a / FS2 + offs[j] - 0.200)    # second = code start - 200 ms
+        o = tm.refine(sc, offs)
+        if o is not None:
+            out.append(a / FS2 + o - 0.200)          # second = code start - 200 ms
     return np.array(out)
 
 
@@ -125,16 +126,16 @@ def eczas_frames(ze, name, t_name):
         seg = ph[a:b]; tt = np.arange(a, b) / FS2
         seg = seg - np.polyval(np.polyfit(tt, seg, 1), tt)
         bits = np.array(make_frame(N, 2), float) * 2 - 1
-        def score(T):
-            idx = np.floor((tt - T) / 0.020).astype(int)
-            m = np.where((idx >= 0) & (idx < 96), bits[np.clip(idx, 0, 95)], 0.0)
-            m = m - m[m != 0].mean() * (m != 0)
+        def score(T):                                # 16.6 ms linear ramps STARTING at the bit edges
+            m, mk = tm.eczas_phase(tt, T, bits)
+            m = (m - m[mk].mean()) * mk
             return float(np.dot(seg, m))
         cand = np.arange(-0.100, 0.1001, 0.0005)
         s1 = np.array([score(t0 + c) for c in cand]); j = int(np.argmax(np.abs(s1)))
-        fine = np.arange(cand[j] - 0.0005, cand[j] + 0.00051, 0.00005)
+        fine = np.arange(cand[j] - 0.0006, cand[j] + 0.00061, 0.00005)
         s2 = np.array([score(t0 + c) for c in fine])
-        out.append(t0 + fine[int(np.argmax(np.abs(s2)))])
+        T = tm.refine(s2, fine)
+        if T is not None: out.append(t0 + T)         # = ramp START of the first bit change = the second
     return np.array(out)
 
 

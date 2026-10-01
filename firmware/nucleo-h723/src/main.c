@@ -461,9 +461,13 @@ static double F_true = F_CARRIER;          /* mixer frequency in true Hz */
 static double pl_t;                        /* true time (capture units) at the next block start */
 static double pl_cyc;                      /* mixer phase (cycles, fractional) at the next block start */
 static double pl_t0; static uint64_t pl_n0; /* true time (capture units) of 2 kHz sample pl_n0: the 2 kHz scale is exact true time from there */
-static void pl_calibrate(uint64_t written)
+static void pl_calibrate(void)
 {
+    /* the DMA count and both timers in one interrupt-free window: written was read earlier (before the
+       cache invalidate and the min/max loops), so sample times came out tens of us late (review 1 Oct).
+       Remaining: +-1 sample (1 us) for a conversion still in flight */
     __disable_irq();
+    uint64_t written = samples_written();
     uint32_t n16 = REF_TIM->CNT, c6 = TIM6->CNT, ll = lse_last;
     uint64_t lt = lse_tot_ticks;
     __enable_irq();
@@ -807,7 +811,7 @@ static void dcf_report(void)
 {
     char m[420], b1[16], b2[16], b3[16], b4[16], b5[16], b6[16], b7[16], cmp[120] = "";
     if (dcf.have_mark && tk.synced) {
-        double start = (double)((n2k - dcf.mark) / 2000 * 2000 + dcf.mark) + (dcf.pm_sigma > DCF_PM_MIN ? dcf.pm_lag_ms * 2.0 : 0);
+        double start = (double)((n2k - dcf.mark) / 2000 * 2000 + dcf.mark) + (dcf.pm_sigma > DCF_PM_MIN ? dcf.pm_lag_ms * 2.0 : (double)dcf.mark_frac);
         uint32_t sec, us;
         if (tk_time(&tk, (int64_t)(start * (TICKS_PER_BLOCK / 4)), &sec, &us)) {
             double ms = us / 1000.0; if (ms > 500) ms -= 1000;
@@ -919,7 +923,7 @@ int main(void)
             } else pl_cyc = fmod(pl_cyc + F_true * dt, 1.0), pl_cyc2 = fmod(pl_cyc2 + F_DCF * dt, 1.0), pl_bad++;
             pl_t = t1;
         } else if (lse_ok && lse_seq >= 2) {
-            pl_calibrate(wr);
+            pl_calibrate();
             pl_t = true_time(200 * (int64_t)rd + pl_c); pl_cyc = 0;
             /* anchor of the 2 kHz scale: output n2k begins at input sample (block start - samples
                already summed into it). pl_t is the block END (rd was advanced): using it put every
@@ -981,7 +985,7 @@ int main(void)
                         ez_s = f3(b2, ms);
                     }
                     if (dcf.have_mark) {
-                        double start = (double)(((uint64_t)n2 - dcf.mark) / 2000 * 2000 + dcf.mark) + (dcf.pm_sigma > DCF_PM_MIN ? dcf.pm_lag_ms * 2.0 : 0);
+                        double start = (double)(((uint64_t)n2 - dcf.mark) / 2000 * 2000 + dcf.mark) + (dcf.pm_sigma > DCF_PM_MIN ? dcf.pm_lag_ms * 2.0 : (double)dcf.mark_frac);
                         double x = fmod(n2 - start, 2000.0); if (x < 0) x += 2000; if (x >= 1000) x -= 2000;
                         dc_s = f3(b3, x / 2.0);                            /* > 0: the DCF77 second began before the GPS second */
                     }

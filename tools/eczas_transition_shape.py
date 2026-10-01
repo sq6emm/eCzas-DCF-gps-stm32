@@ -8,12 +8,15 @@ Per decoded time frame: the frame start T from the ideal-NRZ fit (as tools/tdf_v
 the DCF77 second (phase code - 200 ms). Averaged over isolated bit changes (two equal bits before, two
 after; sign-normalised): the detrended carrier phase around T + 20 ms x k, as a fraction of the step.
 Prints the 5/10/50/90/95 % points relative to the fitted edge and the median T - DCF77 second.
-Result 30 Sep 16:00-17:20 (2550 transitions, 371 frames): a linear ramp of ~18 ms, -9 ... +9 ms around
-the fitted edge (the NRZ fit finds the ramp's middle), step 31 deg; the frame's preamble (1010...) leaves
-the idle phase 9.3 ms before the fitted start.
+Old result (30 Sep, step-model fit, which marked the ramp MIDDLE with a ~-0.2 ms bias): ramp ~18 ms,
+-9 ... +9 ms around the fitted edge, step 31 deg. Since 1 Oct 2026 the frame start is fitted with the
+continuous 16.6 ms ramp model (tools/timing_models.py) and marks the ramp START; the shape below is then
+relative to the ramp start (an independent review measured 16.6 ms, -7.9 ... +8.7 ms around the middle,
+on the NUCLEO's own dumps).
 """
 import sys, os, csv, datetime as dt, numpy as np, scipy.io.wavfile as wf, scipy.signal as ss
 sys.path.insert(0, "/codec"); from eczas_codec import make_frame
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import timing_models as tm
 
 
 import sys
@@ -53,9 +56,9 @@ def tdf_seconds(z):
         seg = z[c0: c0 + len(k)]
         if len(seg) < len(k): break
         sc = np.abs(M.conj() @ seg)
-        j = int(np.argmax(sc))
-        if 0 < j < len(taus) - 1 and sc[j] > 0.5 * np.abs(seg).sum():         # minute-marker second: no element
-            out.append((c0 - k[0]) / FS2 + taus[j] / 1000.0 + 0.050)       # zero crossing = UTC second
+        tau = tm.refine(sc, taus)                    # continuous model; parabolic peak (review 1 Oct)
+        if tau is not None and sc.max() > 0.5 * np.abs(seg).sum():         # minute-marker second: no element
+            out.append((c0 - k[0]) / FS2 + tau / 1000.0 + 0.050)           # zero crossing = UTC second
     return np.array(out)
 
 
@@ -73,14 +76,12 @@ def dcf_seconds(z):
     # does with the tracked carrier); the unwrapped phase wanders too much at ~25 dB-Hz: no correlation
     ref = np.convolve(z, np.ones(FS2) / FS2, mode="same")
     ph = np.imag(z * np.conj(ref)) / (np.abs(ref) ** 2 + 1e-30)
-    chip = 120.0 / 77500.0
-    prn = 1.0 - 2.0 * dcf_prn()
+    prn = dcf_prn()
     n = len(ph) // FS2
     L = int(0.800 * FS2)
-    def model(off_s):                                # code over 0..800 ms from the code start + off_s
-        t = np.arange(L) / FS2 - off_s
-        c = np.floor(t / chip).astype(int)
-        return np.where((c >= 0) & (c < 512), prn[np.clip(c, 0, 511)], 0.0)
+    t0, t1 = tm.intervals(np.arange(L), FS2, box=False)   # point samples (zero-phase FIR)
+    def model(off_s):                                # code over 0..800 ms from the code start + off_s,
+        return tm.dcf_code(t0, t1, off_s, prn)       # each sample = average over its interval (no plateaus)
     m0 = model(0.0); m0 = m0 - m0.mean()
     acc = np.zeros(FS2)
     for s in range(n - 1):                           # coarse: fold |corr| over the file
@@ -97,9 +98,9 @@ def dcf_seconds(z):
         if len(seg) < L: break
         seg = seg - np.polyval(np.polyfit(np.arange(L), seg, 1), np.arange(L))
         sc = np.abs(M @ seg)
-        j = int(np.argmax(sc))
-        if 0 < j < len(offs) - 1:
-            out.append(a / FS2 + offs[j] - 0.200)    # second = code start - 200 ms
+        o = tm.refine(sc, offs)
+        if o is not None:
+            out.append(a / FS2 + o - 0.200)          # second = code start - 200 ms
     return np.array(out)
 
 
@@ -114,20 +115,23 @@ def eczas_frames(ze, name, t_name):
         seg = ph[a:b]; tt = np.arange(a, b) / FS2
         seg = seg - np.polyval(np.polyfit(tt, seg, 1), tt)
         bits = np.array(make_frame(N, 2), float) * 2 - 1
-        def score(T):
-            idx = np.floor((tt - T) / 0.020).astype(int)
-            m = np.where((idx >= 0) & (idx < 96), bits[np.clip(idx, 0, 95)], 0.0)
-            m = m - m[m != 0].mean() * (m != 0)
+        def score(T):                                # 16.6 ms linear ramps STARTING at the bit edges
+            m, mk = tm.eczas_phase(tt, T, bits)
+            m = (m - m[mk].mean()) * mk
             return float(np.dot(seg, m))
         cand = np.arange(-0.100, 0.1001, 0.0005)
         s1 = np.array([score(t0 + c) for c in cand]); j = int(np.argmax(np.abs(s1)))
-        fine = np.arange(cand[j] - 0.0005, cand[j] + 0.00051, 0.00005)
+        fine = np.arange(cand[j] - 0.0006, cand[j] + 0.00061, 0.00005)
         s2 = np.array([score(t0 + c) for c in fine])
-        out.append(t0 + fine[int(np.argmax(np.abs(s2)))])
+        T = tm.refine(s2, fine)
+        if T is not None: out.append(t0 + T)         # = ramp START of the first bit change = the second
     return np.array(out)
 
 
+
+
 def eczas_frames_one(ze, ph, name, t_name, N):
+    """frame start = ramp START of the first bit change (continuous 16.6 ms ramp model, timing_models)"""
     slot = EPOCH + dt.timedelta(seconds=3 * N)
     t0 = (slot - t_name).total_seconds() + 0.05
     a = int((t0 - 0.2) * FS2); b = int((t0 + 2.2) * FS2)
@@ -136,15 +140,15 @@ def eczas_frames_one(ze, ph, name, t_name, N):
     seg = seg - np.polyval(np.polyfit(tt, seg, 1), tt)
     bits = np.array(make_frame(N, 2), float) * 2 - 1
     def score(T):
-        idx = np.floor((tt - T) / 0.020).astype(int)
-        m = np.where((idx >= 0) & (idx < 96), bits[np.clip(idx, 0, 95)], 0.0)
-        m = m - m[m != 0].mean() * (m != 0)
+        m, mk = tm.eczas_phase(tt, T, bits)
+        m = (m - m[mk].mean()) * mk
         return float(np.dot(seg, m))
     cand = np.arange(-0.100, 0.1001, 0.0005)
     s1 = np.array([score(t0 + c) for c in cand]); j = int(np.argmax(np.abs(s1)))
-    fine = np.arange(cand[j] - 0.0005, cand[j] + 0.00051, 0.00005)
-    s2 = np.array([score(t0 + c) for c in fine])
-    return t0 + fine[int(np.argmax(np.abs(s2)))]
+    fine = np.arange(cand[j] - 0.0006, cand[j] + 0.00061, 0.00005)
+    T = tm.refine(np.array([score(t0 + c) for c in fine]), fine)
+    return None if T is None else t0 + T
+
 
 W0, W1 = -0.040, 0.040
 K = np.arange(int(W0*FS2), int(W1*FS2))

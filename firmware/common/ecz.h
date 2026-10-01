@@ -28,12 +28,15 @@ typedef struct {
 void ecz_init(ecz_t *e);
 void ecz_push(ecz_t *e, int16_t ph);        /* phase, 65536 = 360 deg */
 
-/* Frame-time correction for this receiver: the core's template and timing refinement model each bit
-   transition as a RAMP_BLOCKS (8 = 16 ms) ramp starting at the bit edge - the slew of the SI4735 + audio
-   PLL chain. The coherent tracker here switches in ~5 ms, so the template lands ~7.4 ms early: measured
-   30 Sep 2026 on the NUCLEO's own dumps (tools/nucleo_timing_check.py: -7.31 ms on the board, host/cohsim -c:
-   -7.53 ms). Kept at RAMP_BLOCKS 8 (lowest timing jitter) and corrected here; added to every frame time. */
+/* Frame-time offset added to every frame time. The core's template and timing refinement model each bit
+   change as a RAMP_BLOCKS (8 = 16 ms) linear ramp STARTING at the bit edge, and the transmitted signal
+   really is such a ramp (measured 1 Oct 2026 on the NUCLEO's dumps: linear, ~16.6 ms, -7.9 ... +8.7 ms
+   around its middle; independent review). So the core reports the ramp START = the instant GUM's
+   "transmission starts at the beginning of the second" refers to - no correction (0).
+   History: 75340d9 (30 Sep) set 7400 with a wrong explanation ("the tracker switches in ~5 ms"): it moved
+   the reported instant from the ramp start to ~0.5 ms before the ramp middle (its calibration tool had a
+   fit bias). For the ramp-middle convention use ~7920. */
 #ifndef ECZ_TEMPLATE_LAG_US
-#define ECZ_TEMPLATE_LAG_US 7400
+#define ECZ_TEMPLATE_LAG_US 0
 #endif
 #endif
