@@ -94,11 +94,28 @@ second definition (zero crossing, from secondary sources only) and the night pat
 
 > **CORRECTION 1 Oct 2026, ~12:40 (GPS PPS, NEO-7P):** all DCF77 phase-code times above (IC-7610 and
 > NUCLEO) were **1.548 ms late**: our PRN generator missed PTB's chip 0 (sequence 00000100011...,
-> fixed in 16fd3b4). Corrected: e-CzasPL - DCF77 at the receiver **+18.15 ms** (16.61 + 1.55; 29 Sep
-> rerun +18.05), at the transmitters **~19.3 ms**; e-CzasPL - TDF unchanged (+16.48 receiver, ~19.6 ms
-> at the transmitters); TDF - DCF77 at the transmitters **~-0.3 ms** (not -1.8). GPS directly: the
-> NUCLEO's e-CzasPL second arrives 25.18 - 5.00 (PPS anchor bug, a03170e) = ~20.2 ms after UTC ->
-> ~19.4 ms late at the transmitter. All three references agree: **e-CzasPL is ~19.3-19.6 ms late**.
+> fixed in 16fd3b4). Corrected: e-CzasPL - DCF77 at the receiver **+18.15 ms** (16.61 + 1.55), at the
+> transmitters **~19.3 ms**; e-CzasPL - TDF unchanged (+16.48 receiver, ~19.6 ms at the transmitters);
+> TDF - DCF77 at the transmitters **~-0.3 ms** (not -1.8). GPS directly: the NUCLEO's e-CzasPL second
+> arrives 25.18 - 5.00 (PPS anchor bug, a03170e) = ~20.2 ms after UTC -> ~19.4 ms late at the
+> transmitter. **e-CzasPL is ~19.3-19.6 ms late.**
+>
+> **Strength of the evidence (independent review, 1 Oct):**
+> - Sequence: the new one is bit-identical to Wikipedia's Galois code; Hetzel 1988 (PTB, the original
+>   description) has the generator start from the all-zero state and visit all 512 states once, which
+>   matches the new sequence, but prints no bits - strong, not formal proof. Best direct evidence: on
+>   the NUCLEO the AM second mark (-7.265 ms vs GPS) and the corrected phase code (-7.15 ms) now agree;
+>   with the old sequence the phase code came 1.45 ms after the AM mark (physically odd).
+> - NOT evidence (stated wrongly in commit 16fd3b4): the "256 ones / 256 zeros" balance - the old
+>   sequence was balanced too; and the IC-7610 rerun +16.50 -> +18.05 ms, which is the same template
+>   shift on the same data (circular).
+> - TDF - DCF77 -1.8 -> -0.3 ms: real but weak support (IC-7610 MAIN/SUB path delays at 78.5/163 kHz
+>   uncalibrated, TDF antenna delay unknown, the -1.8 ms was known before the fix).
+> - Still unexplained: ~0.27 ms (DCF77 vs GPS -2.20 ms after both fixes vs -1.93 expected); not the
+>   receiver's sample timing (simulated: no half-sample bias); candidates: DCF77 antenna bandwidth,
+>   ground-wave delay beyond the straight-line value, peak-interpolation bias. To settle: a GPS-locked
+>   synthetic DCF77 signal into the antenna input (receiver delay end to end), and the sequence in
+>   writing (PTB-Mitteilungen 114 (2004), Meinberg PZF docs, or PTB).
 > The ramp-start convention below (~9 ms earlier) and the drift (~0.1 ms/day) still apply.
 
 - **Not a time scale.** TAI/GPS/UTC differ by whole seconds. UT1 - UTC is -19.3 ms (28 Sep) ... -21.6 ms
