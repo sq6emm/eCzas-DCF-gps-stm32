@@ -1,3 +1,5 @@
 build/
 lib/
 __pycache__/
+# built in the dcfbench:1 image; the ic7610-dcf container runs it - do not delete
+firmware/host/dcfminsim
