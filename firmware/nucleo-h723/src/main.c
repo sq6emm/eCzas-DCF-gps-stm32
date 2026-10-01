@@ -921,7 +921,10 @@ int main(void)
         } else if (lse_ok && lse_seq >= 2) {
             pl_calibrate(wr);
             pl_t = true_time(200 * (int64_t)rd + pl_c); pl_cyc = 0;
-            pl_t0 = pl_t; pl_n0 = n2k;
+            /* anchor of the 2 kHz scale: output n2k begins at input sample (block start - samples
+               already summed into it). pl_t is the block END (rd was advanced): using it put every
+               GPS PPS one block (5 ms) early on the 2 kHz scale - measured 1 Oct 2026 with a NEO-7P */
+            pl_t0 = true_time((int64_t)(200.0 * ((double)(rd - BLOCK) - dec_pos)) + pl_c); pl_n0 = n2k;
             F_true = F_CARRIER;                /* fixed; the carrier trackers follow the rest */
             pl_ok = 1;
         }
