@@ -34,6 +34,12 @@
 #ifndef EFC_VREF
 #define EFC_VREF     1.7e-18       /* (1.3 ppb)^2: DCF77's minute noise on the rod by day */
 #endif
+#ifndef EFC_V10REF
+#define EFC_V10REF   6.25e-20      /* (0.25 ppb)^2: 10-min Allan variance of e-CzasPL - DCF77 by day (rod,
+                                      29-30 Sep 06-17 UTC: 0.09-0.29 ppb). The loop also slows by
+                                      sqrt(v10 / EFC_V10REF): the night's slow DCF77 wander (sky wave, tens of
+                                      minutes) hardly shows in the minute differences. 0 = off */
+#endif
 #ifndef EFC_BIAS_VMAX
 #define EFC_BIAS_VMAX 4e-18        /* learn e-CzasPL's offset only while DCF77's minute noise is below
                                       2 ppb (daytime ground wave); frozen when DCF77 is noisy (night):
@@ -62,6 +68,7 @@ void efc_init(efc_t *f, double code, double slope)
     f->bias = f->bsum = 0; f->bn = 0;
     f->vd = f->ve = 2e-18; f->pyd = f->pye = 0; f->hd = f->he = 0; f->we = 0; f->veff = 0; f->tau = EFC_TAU;
     f->dbad = 0;
+    f->r10sum = f->r10prev = f->v10 = 0; f->r10n = f->r10gap = 0; f->h10 = 0;
     if (slope != 0) { f->slope = slope; f->state = EFC_LOCK; f->skip = 0; }
 }
 
@@ -71,6 +78,17 @@ int efc_minute2(efc_t *f, int vd, double yd, int ve, double ye, double T)
     if (vd) { if (f->hd) { double d = yd - f->pyd; f->vd += (0.5 * d * d - f->vd) / EFC_NOISE_N; } f->pyd = yd; }
     if (ve) { if (f->he) { double d = ye - f->pye; f->ve += (0.5 * d * d - f->ve) / EFC_NOISE_N; } f->pye = ye; }
     f->hd = vd; f->he = ve;
+    /* 10-min noise of e-CzasPL - DCF77 (independent of the OCXO steering): Allan variance of 10-min means,
+       ~1 h average; a gap of more than 2 minutes starts a new pair of blocks */
+    if (vd && ve) {
+        f->r10gap = 0; f->r10sum += ye - yd;
+        if (++f->r10n == 10) {
+            double m = f->r10sum / 10;
+            if (f->h10) { double d = m - f->r10prev; f->v10 += (0.5 * d * d - f->v10) / 6.0; }
+            else if (f->v10 == 0) f->v10 = EFC_V10REF;
+            f->r10prev = m; f->h10 = 1; f->r10sum = 0; f->r10n = 0;
+        }
+    } else if (++f->r10gap > 2) { f->r10sum = 0; f->r10n = 0; f->h10 = 0; }
     f->veff = vd ? f->vd : f->ve;                     /* noise of what steers (DCF77 alone / e-CzasPL alone) */
     int src = EFC_SRC_NONE; double y = 0;
     f->we = 0;
@@ -167,6 +185,10 @@ void efc_minute(efc_t *f, int src, double y, double T)
         f->outliers = 0;
         {
             double r = f->veff > 0 ? sqrt(f->veff / EFC_VREF) : 1;
+            if (EFC_V10REF > 0 && f->we < 0.5 && f->v10 > 0) {      /* DCF77 steers */
+                double r10 = sqrt(f->v10 / EFC_V10REF);
+                if (r10 > r) r = r10;
+            }
             if (r < 1) r = 1;
             if (r > EFC_TAU_MAXF) r = EFC_TAU_MAXF;
             f->tau += (EFC_TAU * r - f->tau) * T / 1800;  /* changes slowly (30 min) */

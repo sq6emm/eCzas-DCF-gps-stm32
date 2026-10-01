@@ -21,6 +21,7 @@ int main(int argc, char **argv)
     char t[32]; int vd, ve, nd = 0; double yd, ye, cl, cn, clp = -1, c0 = -1;
     const char *cm = getenv("CN0_MIN"); double cn0_min = cm ? atof(cm) : -1e9;
     efc_t f; double csum = 0, cprev_avg = 0;
+    double tsum = 0, tmax = 0;
     double x = 0, sx2 = 0, xmax = 0, ymax = 0, wx = 0, wx2 = 0, wxmax = 0, wymax = 0; long n = 0, wn = 0, nsrc[4] = { 0 };
     while (fscanf(fp, "%31s %d %lf %d %lf %lf %lf", t, &vd, &yd, &ve, &ye, &cl, &cn) == 7) {
         if (cm) { nd = (vd && cn >= cn0_min) ? nd + 1 : 0; vd = nd > 2; }
@@ -33,6 +34,7 @@ int main(int argc, char **argv)
         double yds = yd + adj, yes = ye + adj;
         int src = efc_minute2(&f, vd, yds, ve, yes, 60.0);
         nsrc[src]++;
+        tsum += f.tau; if (f.tau > tmax) tmax = f.tau;
         double yt = yes - bias;                          /* truth: OCXO error by e-CzasPL */
         x += yt * 60; n++; sx2 += x * x;
         if (fabs(x) > xmax) xmax = fabs(x);
@@ -45,8 +47,8 @@ int main(int argc, char **argv)
         for (int k = 0; k < 60; k++) { csum += f.c; efc_tick(&f, 1.0); }
         cprev_avg = csum / 60; clp = cl;
     }
-    printf("minutes %ld (src none/DCF77/e-CzasPL/both %ld/%ld/%ld/%ld) | all: time rms %.0f ns max %.0f ns, freq max %.1f ppb | from %s: %ld min, time rms %.0f max %.0f ns, freq max %.1f ppb\n",
+    printf("minutes %ld (src none/DCF77/e-CzasPL/both %ld/%ld/%ld/%ld) | all: time rms %.0f ns max %.0f ns, freq max %.1f ppb | from %s: %ld min, time rms %.0f max %.0f ns, freq max %.1f ppb | loop mean %.0f max %.0f s\n",
            n, nsrc[0], nsrc[1], nsrc[2], nsrc[3], sqrt(sx2 / n) * 1e9, xmax * 1e9, ymax * 1e9, wfrom, wn,
-           wn ? sqrt(wx2 / wn) * 1e9 : 0, wxmax * 1e9, wymax * 1e9);
+           wn ? sqrt(wx2 / wn) * 1e9 : 0, wxmax * 1e9, wymax * 1e9, tsum / n, tmax);
     return 0;
 }

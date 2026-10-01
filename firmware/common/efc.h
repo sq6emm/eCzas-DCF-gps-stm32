@@ -47,6 +47,8 @@ typedef struct {
     double we;                     /* weight of e-CzasPL in the last combined minute */
     double veff, tau;              /* noise variance of the steering measurement, loop time constant in use */
     int    dbad;                   /* minutes left in which DCF77 is not trusted (it was the wrong one) */
+    double r10sum, r10prev, v10;   /* 10-min means of e-CzasPL - DCF77 and their Allan variance */
+    int    r10n, r10gap, h10;
 } efc_t;
 
 /* slope 0: calibrate first; otherwise the known slope [fraction per code] -> straight to LOCK */

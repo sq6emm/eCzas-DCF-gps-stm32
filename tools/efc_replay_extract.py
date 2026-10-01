@@ -26,8 +26,9 @@ for raw in open(log, "rb"):
     ph = float(ph)
     if prev is not None and le == "locked":
         ye = (ph - prev) / (F_E * 60.0)
-        yd = ye - float(diff) * 1e-9
-        row = (t[:19], int(ld == "locked"), f"{yd:.4e}", int(le == "locked"), f"{ye:.4e}", cn if cn != "-" else "-99")
+        dok = diff not in ("-", "+") and ld == "locked"   # '-': no DCF77 measurement (e.g. after a reboot)
+        yd = ye - float(diff) * 1e-9 if dok else 0.0
+        row = (t[:19], int(dok), f"{yd:.4e}", int(le == "locked"), f"{ye:.4e}", cn if cn != "-" else "-99")
     else:
         row = None
     prev = ph if le == "locked" else None
