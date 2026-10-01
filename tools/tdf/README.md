@@ -80,9 +80,38 @@ frame of the decoded N (0.2 ms per frame). Radio MAIN - SUB delay with both on 2
 | TDF - DCF77 from the two above | +0.14 ms | |
 
 At night the DCF77 timing on this radio moves by several ms (evening files +12.4 ... +20.7 against
-+16.6 by day, sky wave); TDF at night and DCF77 by day are steady. With ground-wave delays (DCF77 580 km
-1.93 ms, TDF 1162 km 3.87 ms, e-CzasPL 234 km 0.78 ms) e-CzasPL's second leaves ~15.5 ms after DCF77's and
-~13.4 ms after TDF's; the ~2 ms between those two is within what the path assumptions (night sky wave for
-TDF) and the conventions allow, but not below. NOTE: the NUCLEO reports e-CzasPL - DCF77 = +8.9 ms at the
-board - 7.7 ms less than this; one of the NUCLEO's chains (ecz.c / eCzas core or dcf.c) has an
-uncompensated delay; the GPS PPS test measures each against GPS separately.
++16.6 by day, sky wave); TDF at night and DCF77 by day are steady.
+
+At the transmitters (CORRECTED 1 Oct; the first version subtracted the path difference instead of
+adding it): a station further away must have sent earlier, so emission difference = arrival difference
++ (its path delay - e-CzasPL's). Ground-wave delays: DCF77 580 km 1.93 ms, TDF 1162 km 3.87 ms, e-CzasPL
+234 km 0.78 ms. e-CzasPL's fitted second leaves **~17.8 ms after DCF77's** (16.61 + 1.15) and **~19.6 ms
+after TDF's** (16.48 + 3.09); TDF - DCF77 at the transmitters -1.8 ms, which is within what the TDF
+second definition (zero crossing, from secondary sources only) and the night path allow. The NUCLEO
+(after the +7.4 ms fix, 75340d9) prints the same quantity: "at the transmitters -17.4 ms".
+
+### Why ~17 ms? (1 Oct 2026)
+
+- **Not a time scale.** TAI/GPS/UTC differ by whole seconds. UT1 - UTC is -19.3 ms (28 Sep) ... -21.6 ms
+  (30 Sep) (IERS Bulletin A), close in size, but it moves ~1.1 ms/day; e-CzasPL - DCF77 moved ~0.1 ms/day
+  (below), so e-CzasPL does not follow UT1.
+- **Part of it is the modulation shape** (`tools/eczas_transition_shape.py`, 30 Sep 16:00-17:20, 2550
+  isolated bit changes): every bit change is a linear phase ramp of ~18 ms, from -9 to +9 ms around the
+  edge the ideal-NRZ fit finds, i.e. the fit (and all numbers above) mark the ramp's middle. The frame's
+  1010... preamble leaves the idle phase 9.3 ms before the fitted start. If "the beginning of the second"
+  is where the first ramp starts (a causal ramp starting at the bit clock), e-CzasPL is late by
+  16.6 - 9.3 = 7.3 ms at Wroclaw, **~8.5 ms at the transmitter**; if the ramp is meant to be centred on
+  the bit clock, ~17.8 ms. Either way at least ~8 ms remain.
+- **It drifts.** e-CzasPL's second moves later against DCF77 by **~0.1 ms/day**: NUCLEO tracker
+  28 Sep 14:00 - 30 Sep 22:30, -0.117 +- 0.010 ms/day (313 10-min values, 2.35 days); IC-7610
+  +16.50 ms (29 Sep 12-15, 18 files, spread 0.07) -> +16.61 ms (30 Sep 16-17:30), +0.10 ms/day. Same
+  sign and size as e-CzasPL's carrier being ~0.85 ppb low against DCF77 (0.073 ms/day if the seconds were
+  counted on the carrier's oscillator; measured ~1.4 ppb equivalent). A transmitter whose seconds were
+  disciplined to UTC (GNSS) would not drift at all; a clock that is only set now and then would - at
+  0.1 ms/day, 17 ms accumulate in ~5-6 months. Earlier outside reports of 10-25 ms late (PA3FWM) fit a
+  value that changes.
+- So most likely: the frame timing comes from a clock that is not continuously steered to UTC at the
+  ms level (free-running or rarely corrected), plus the ramp convention and an uncompensated chain delay.
+  GUM's own stated accuracy is "kilku lub kilkunastu milisekund" (a few to over a dozen ms), so ~17 ms is
+  at the limit of what they promise. Watching the drift for weeks (and any step) tells which: a slow
+  steady drift = free running; a sudden step = a correction.
