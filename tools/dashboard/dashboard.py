@@ -27,6 +27,7 @@ LOG = os.environ.get("LOG", "/log/rx.log")
 PORT = int(os.environ.get("PORT", "8077"))
 GPS_FROM = os.environ.get("GPS_FROM", "2026-10-01T18:10")
 REDRAW = 120
+SLOPE_PPB, CODE_REF = 0.816, 2252.5     # EFC slope [ppb/code] (measured 28 Sep) and the reference code
 RANGES = {"6": 6, "24": 24, "72": 72, "all": None}
 
 NUM = r"([-+]?\d+(?:\.\d+)?|-)"
@@ -100,6 +101,7 @@ def series(r0, r1):
     with lock:
         keys = [k for k in sorted(refs) if r0 <= k < r1]
         rows = [refs[k] for k in keys]; src = [ocxo.get(k, (None, None))[1] for k in keys]
+        code = np.array([ocxo.get(k, (np.nan, None))[0] for k in keys], float)
     t = np.array([dt.datetime.fromtimestamp(k * 60, dt.timezone.utc) for k in keys])
     nan = float("nan")
     g = np.array([r["g"] if r["g"] is not None and r["n"] >= 50 else nan for r in rows])
@@ -108,7 +110,8 @@ def series(r0, r1):
     ph = np.array([r["ph"] if r["ph"] is not None and r["n"] >= 50 else nan for r in rows])
     for a in (g, d, e): a[np.abs(a) > 200] = nan            # corrupted log lines
     sus = np.array([r["sus"] is not None for r in rows])
-    return np.array(keys), t, g, d, e, ph, sus, src
+    free = g + SLOPE_PPB * (code - CODE_REF)               # OCXO frequency without the steering
+    return np.array(keys), t, g, d, e, ph, sus, src, free
 
 
 def adev(keys, y, taus):
@@ -159,7 +162,7 @@ def render(rng):
     gps0 = int(ts(GPS_FROM).timestamp() // 60)
     hours = RANGES[rng]
     r0 = gps0 if hours is None else max(gps0, int(now.timestamp() // 60) - hours * 60)
-    keys, t, g, d, e, ph, sus, src = series(r0, 1 << 40)
+    keys, t, g, d, e, ph, sus, src, free = series(r0, 1 << 40)
     out = {}
     t0 = ts(GPS_FROM) if hours is None else now - dt.timedelta(hours=hours)
     t0 = max(t0, ts(GPS_FROM)) if hours is None else t0
@@ -209,6 +212,17 @@ def render(rng):
     ax.xaxis.set_major_formatter(xfmt); fig.autofmt_xdate()
     ax.set_title("OCXO time error against GPS", fontsize=10, loc="left")
     out["phase"] = png(fig)
+
+    # 3b) the OCXO's own frequency (steering removed): what the loop has to correct
+    fig, ax = plt.subplots(figsize=(12, 3.6))
+    shade_night(ax, t0, now)
+    if len(t):
+        ax.plot(t, free, ".", ms=2.5, color="tab:purple", alpha=0.35, label=f"OCXO vs GPS at EFC code {CODE_REF} (1-min)")
+        ax.plot(t, rolling(free), "-", lw=1.6, color="tab:purple", label="10-min mean")
+    ax.set_ylabel("ppb"); ax.grid(alpha=0.3); ax.legend(loc="upper left", fontsize=8)
+    ax.xaxis.set_major_formatter(xfmt); fig.autofmt_xdate()
+    ax.set_title("OCXO free-running frequency (GPS-measured frequency + EFC slope x code offset; > 0: slow)", fontsize=10, loc="left")
+    out["free"] = png(fig)
 
     # 4) hourly decodes vs expected
     with lock:
@@ -287,6 +301,7 @@ a.on{{font-weight:bold}} h2{{margin-top:28px}}</style></head><body>
 <h2>Carrier frequency against GPS</h2><img src="/carriers.png?r={r}&v={v}">
 <h2>Stability (Allan deviation)</h2><img src="/adev.png?r={r}&v={v}">
 <h2>OCXO time error against GPS</h2><img src="/phase.png?r={r}&v={v}">
+<h2>OCXO free-running frequency</h2><img src="/free.png?r={r}&v={v}">
 <h2>Decodes vs expected, per hour</h2><img src="/decodes.png?r={r}&v={v}">
 <h2>Hourly table (latest first)</h2>{table}
 </body></html>"""
