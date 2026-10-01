@@ -72,8 +72,7 @@ of the frame (GUM: "transmisja rozpoczyna się od początku sekundy"; the '0' of
 exactly 0.5 s later - GUM's agreed moment for loading the time). The PSK is one-sided (idle carrier = one
 level, the other -36 deg) and every bit change is a **linear ramp of ~19 ms**: 18.6 ms fitted on the
 IC-7610 (60 frames), 19 ms according to GUM (stated to J. Sadowski, see below; not in the
-specification). The 0x680C start sequence of GUM's document is not transmitted (doc/GUM-issue-1 in the
-eCzasPL repo, observation 2).
+specification).
 
 Distances from the receiver's GPS fix (Wroclaw), ground wave at c: DCF77 Mainflingen 573.2 km 1.912 ms,
 TDF Allouis 1156.1 km 3.856 ms, e-CzasPL Solec Kujawski 229.3 km 0.765 ms.
