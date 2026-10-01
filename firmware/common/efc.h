@@ -50,6 +50,12 @@ typedef struct {
     double r10sum, r10prev, v10;   /* 10-min means of e-CzasPL - DCF77 and their Allan variance */
     int    r10n, r10gap, h10;
     double gx_off, gx, vg, pyg;   /* GPS: phase offset (continuity at take-over), last phase, minute noise */
+    int    gsus, gsus_why, gsus_age; /* GPS suspended for this many minutes; why: 1 phase jump, 2 both stations
+                                     disagree; minutes since the suspension began */
+    double dg10, eg10, bdg, beg;  /* 10-min sums of station - GPS; the stations' offsets learned against GPS */
+    int    n10g, nd10, ne10, nbg;
+    double gxr_prev, gyr_prev, c_min;   /* raw GPS phase / frequency of the last minute, code then */
+    int    gxr_ok, gyr_ok;
 } efc_t;
 
 /* slope 0: calibrate first; otherwise the known slope [fraction per code] -> straight to LOCK */

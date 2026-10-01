@@ -1061,9 +1061,11 @@ int main(void)
                 {   /* the three references against the OCXO, every minute (> 0: the OCXO runs slow against it);
                        with the GPS steering, DCF77 and e-CzasPL here are their carriers against GPS */
                     char g1[24], g2[24], g3[24], g4[24];
-                    snprintf(m, sizeof m, "GPS %s ppb, phase %s ns (%d pulses) | DCF77 %s ppb | e-CzasPL %s ppb",
+                    int nn = snprintf(m, sizeof m, "GPS %s ppb, phase %s ns (%d pulses) | DCF77 %s ppb | e-CzasPL %s ppb",
                              ng >= 50 ? f3(g1, efc.pyg * 1e9) : "-", ng >= 50 ? f1(g2, efc.gx * 1e9, 1) : "-", ng,
                              vd ? f3(g3, yd * 1e9) : "-", ve ? f3(g4, ye * 1e9) : "-");
+                    if (efc.gsus > 0 && nn > 0 && nn < (int)sizeof m)
+                        snprintf(m + nn, sizeof m - nn, " | GPS SUSPENDED (%s), %d min", efc.gsus_why == 1 ? "phase jump" : "disagrees with DCF77/e-CzasPL", efc.gsus);
                     put_line("REFS", m);
                 }
                 if (src == EFC_SRC_BOTH && efc.we <= 0) src = EFC_SRC_DCF77;   /* e-CzasPL weight 0: DCF77 steers */

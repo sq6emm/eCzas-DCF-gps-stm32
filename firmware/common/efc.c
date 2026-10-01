@@ -63,6 +63,23 @@
                                       600 s 36 ns, 1000 s 97 ns, 2000 s 187 ns; simulation (host/efcgpssim,
                                       2 days): 600 s 16 ns, 1000 s 40-47 ns, 3000 s 619 ns */
 #endif
+#ifndef EFC_GPS_JUMP
+#define EFC_GPS_JUMP 300e-9        /* GPS phase this far from where the OCXO's frequency predicts it: a jump the
+                                      OCXO cannot make (spoofing, receiver step) -> GPS suspended */
+#endif
+#ifndef EFC_GPS_DIS
+#define EFC_GPS_DIS  10e-9         /* 10-min mean GPS frequency this far from BOTH stations (each minus its offset
+                                      learned against GPS) -> GPS suspended (night DCF77 wander stays below) */
+#endif
+#ifndef EFC_GPS_HOLD_J
+#define EFC_GPS_HOLD_J 10          /* minutes suspended after a phase jump (then re-taken, the jump excluded) */
+#endif
+#ifndef EFC_GPS_HOLDOVER
+#define EFC_GPS_HOLDOVER 60        /* minutes of holdover in a suspension before DCF77 / e-CzasPL steer */
+#endif
+#ifndef EFC_GPS_HOLD_F
+#define EFC_GPS_HOLD_F 30          /* minutes suspended after a frequency disagreement */
+#endif
 #define EFC_MAX 4095.0
 
 static double clampc(double c) { return c < 0 ? 0 : c > EFC_MAX ? EFC_MAX : c; }
@@ -78,6 +95,8 @@ void efc_init(efc_t *f, double code, double slope)
     f->dbad = 0;
     f->r10sum = f->r10prev = f->v10 = 0; f->r10n = f->r10gap = 0; f->h10 = 0;
     f->gx_off = f->gx = 0; f->vg = 0; f->pyg = 0;
+    f->gsus = 0; f->gsus_why = 0; f->n10g = f->nd10 = f->ne10 = 0; f->dg10 = f->eg10 = f->bdg = f->beg = 0; f->nbg = 0;
+    f->gxr_prev = f->gyr_prev = 0; f->gxr_ok = f->gyr_ok = 0; f->c_min = f->c; f->gsus_age = 0;
     if (slope != 0) { f->slope = slope; f->state = EFC_LOCK; f->skip = 0; }
 }
 
@@ -142,6 +161,58 @@ int efc_minute2(efc_t *f, int vd, double yd, int ve, double ye, double T)
 int efc_minute3(efc_t *f, int vg, double xg, int vd, double yd, int ve, double ye, double T)
 {
     double y; int src = stations(f, vd, yd, ve, ye, T, &y);   /* DCF77 / e-CzasPL stay ready as fallbacks */
+    /* plausibility of the GPS (spoofing / a receiver that claims a lock but is wrong), from its RAW phase, so it
+       is checked while it steers and while it is suspended:
+       - jump: this minute's phase change against the prediction (last minute's frequency + the frequency change
+         the loop commanded since); a step the OCXO cannot make -> suspended EFC_GPS_HOLD_J minutes;
+       - frequency: every 10 min the GPS frequency against DCF77 and e-CzasPL, each minus its offset learned
+         against GPS while all agreed; both stations off by > EFC_GPS_DIS (or the only one available) ->
+         suspended EFC_GPS_HOLD_F minutes (extended while the disagreement lasts) */
+    {
+        int have_prev = vg && f->gxr_ok;
+        double ygr = have_prev ? (xg - f->gxr_prev) / T : 0;          /* > 0: OCXO slow against the GPS */
+        if (have_prev && f->gyr_ok && f->state == EFC_LOCK) {
+            double dy_cmd = -f->slope * (f->c - f->c_min);             /* code up -> OCXO faster -> y down */
+            if (fabs((ygr - (f->gyr_prev + dy_cmd)) * T) > EFC_GPS_JUMP) {
+                if (f->gsus < EFC_GPS_HOLD_J) f->gsus = EFC_GPS_HOLD_J;
+                f->gsus_why = 1; f->n10g = f->nd10 = f->ne10 = 0; f->dg10 = f->eg10 = 0;
+                have_prev = 0;                                           /* this minute is not used below */
+            }
+        }
+        if (have_prev && f->state == EFC_LOCK) {
+            if (vd) { f->dg10 += yd - ygr; f->nd10++; }
+            if (ve) { f->eg10 += ye - ygr; f->ne10++; }
+            if (++f->n10g == 10) {
+                int dok = f->nd10 >= 7, eok = f->ne10 >= 7, learned = f->nbg >= 30;
+                int dbad = dok && learned && fabs(f->dg10 / f->nd10 - f->bdg) > EFC_GPS_DIS;
+                int ebad = eok && learned && fabs(f->eg10 / f->ne10 - f->beg) > EFC_GPS_DIS;
+                if ((dbad && (ebad || !eok)) || (ebad && !dok)) {
+                    if (f->gsus < EFC_GPS_HOLD_F) f->gsus = EFC_GPS_HOLD_F;
+                    f->gsus_why = 2;
+                } else if (!f->gsus) {                                   /* agreeing: learn the offsets (~3 h) */
+                    double k = f->nbg < 30 ? 1.0 / (f->nbg / 10 + 1) : 10.0 / 180;
+                    if (dok) f->bdg += (f->dg10 / f->nd10 - f->bdg) * k;
+                    if (eok) f->beg += (f->eg10 / f->ne10 - f->beg) * k;
+                    f->nbg += 10;
+                } else if (f->gsus_why == 2 && f->gsus > 1) f->gsus = 1;  /* agreeing again: resume next minute */
+                f->n10g = f->nd10 = f->ne10 = 0; f->dg10 = f->eg10 = 0;
+            }
+        }
+        f->gyr_prev = ygr; f->gyr_ok = have_prev;
+        f->gxr_prev = xg; f->gxr_ok = vg;
+        f->c_min = f->c;
+    }
+    if (f->gsus > 0) {                                 /* suspended: holdover first (a GPS-trained OCXO beats the
+                                                          stations for ~1 h: 1 Oct real OCXO 0.2-0.6 us after 1 h),
+                                                          then DCF77 / e-CzasPL steer as without GPS */
+        f->gsus_age++;
+        int resume = --f->gsus == 0;
+        if (f->gsus_age > EFC_GPS_HOLDOVER && src != EFC_SRC_NONE) efc_minute(f, src, y, T);
+        else { efc_minute(f, EFC_SRC_NONE, 0, T); src = EFC_SRC_NONE; }
+        if (resume) { f->src = EFC_SRC_NONE; f->gsus_age = 0; }   /* re-take GPS with a new phase offset */
+        return src;
+    }
+    f->gsus_age = 0;
     if (!vg) { efc_minute(f, src, y, T); return src; }
     /* the GPS PPS steers: xg = the measured phase (OCXO second behind the GPS second, > 0) with an arbitrary
        constant; when the GPS (re)takes over, that constant is set so the loop's phase continues smoothly */

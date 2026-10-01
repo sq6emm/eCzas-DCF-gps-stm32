@@ -1,7 +1,8 @@
 /* Closed-loop simulation of common/efc.c with the GPS PPS phase lock (efc_minute3), second by second.
  *   efcgpssim [mode] [days] [seed]
  *     mode 0: GPS all the time; 1: GPS with a 6 h outage (DCF77 / e-CzasPL take over) in the middle;
- *          2: DCF77 only (the loop before the GPS lock, for comparison); 3: cold start 20 ppb off, GPS
+ *          2: DCF77 only (the loop before the GPS lock, for comparison); 3: cold start 20 ppb off, GPS;
+ *          4: spoofed GPS phase STEP of 500 ns at mid-run; 5: spoofed GPS FREQUENCY +20 ppb from mid-run
  * OCXO: y_free = offset + random-walk FM + ageing + daily temperature swing; y = y_free - slope (code - c0)
  * (> 0: slow, as in efc.c); the DAC is dithered by efc_tick as on the board. GPS PPS: jitter 20 ns rms on the
  * pulse phase (NEO-7P, 1 Oct 2026); the firmware's unwrap / 10 us glitch filter / minute mean are copied.
@@ -31,7 +32,7 @@ int main(int argc, char **argv)
     double ph_prev = 0, xun = 0, xsum = 0; int have = 0, n = 0;
     int code = (int)c0;
     double *ym = malloc(sizeof(double) * (N / 60 + 2)); long nm = 0; double ysum_min = 0;
-    double sx2 = 0, xmax = 0; long nx = 0; double skyp = 0;
+    double sx2 = 0, xmax = 0; long nx = 0; double skyp = 0; long nsus = 0, nj = 0, nf = 0, ngps = 0;
     for (long t = 0; t < N; t++) {
         double hour = fmod(t / 3600.0, 24.0);
         int night = hour < 5 || hour > 17;
@@ -42,7 +43,8 @@ int main(int argc, char **argv)
         ysum_min += y;
         int gps_on = mode != 2 && !(mode == 1 && t > N / 2 - 3 * 3600 && t < N / 2 + 3 * 3600);
         if (gps_on) {                                                  /* the firmware's PPS processing */
-            double ph = fmod(tocxo + 20e-9 * gauss(), 1.0); if (ph < 0) ph += 1;
+            double spoof = (mode == 4 && t > N / 2) ? 500e-9 : (mode == 5 && t > N / 2) ? -20e-9 * (t - N / 2) : 0;
+            double ph = fmod(tocxo + spoof + 20e-9 * gauss(), 1.0); if (ph < 0) ph += 1;
             if (have) {
                 double st = -(ph - ph_prev); st -= floor(st + 0.5);
                 if (fabs(st) < 1e-5) { xun += st; xsum += xun; n++; ph_prev = ph; } else have = 0;
@@ -55,7 +57,9 @@ int main(int argc, char **argv)
             double yd = ymin + (night ? 3e-9 * gauss() + 4e-9 * sin(skyp) * 0.5 : 1.3e-9 * gauss());
             double ye = ymin - 0.85e-9 + 0.4e-9 * gauss();
             int vg = n >= 50; double xg = n ? xsum / n : 0; xsum = 0; n = 0;
-            efc_minute3(&f, vg, xg, 1, yd, 1, ye, 60.0);
+            int src = efc_minute3(&f, vg, xg, 1, yd, 1, ye, 60.0);
+            if (f.gsus > 0) { nsus++; if (f.gsus_why == 1) nj++; else nf++; }
+            if (src == EFC_SRC_GPS) ngps++;
         }
         code = efc_tick(&f, 1.0);
         if (t > 3 * 3600) {
@@ -64,7 +68,7 @@ int main(int argc, char **argv)
         }
     }
     printf("mode %d (%s), %.1f days, tau_gps %.0f s: time error vs GPS rms %.1f ns max %.1f ns | OCXO ADEV",
-           mode, mode == 0 ? "GPS" : mode == 1 ? "GPS, 6 h outage" : mode == 2 ? "DCF77 only" : "GPS, cold start 20 ppb",
+           mode, mode == 0 ? "GPS" : mode == 1 ? "GPS, 6 h outage" : mode == 2 ? "DCF77 only" : mode == 3 ? "GPS, cold start 20 ppb" : mode == 4 ? "GPS, spoofed 500 ns step" : "GPS, spoofed +20 ppb",
            days, f.tau, sqrt(sx2 / nx) * 1e9, xmax * 1e9);
     int taus[] = { 1, 10, 60, 180, 360 };
     for (int k = 0; k < 5; k++) {
@@ -76,6 +80,6 @@ int main(int argc, char **argv)
         }
         printf(" %d min %.1e", m, c ? sqrt(0.5 * s / c) : 0);
     }
-    printf("\n");
+    printf(" | GPS steering %ld min, suspended %ld min (jump %ld, disagreement %ld)\n", ngps, nsus, nj, nf);
     return 0;
 }
