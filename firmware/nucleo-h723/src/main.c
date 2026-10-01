@@ -313,6 +313,12 @@ static volatile uint64_t cap_tick[CAPR];
    so the pulse lands on the samples' own time base (5 ns steps). Nothing connected = no captures. */
 static volatile uint64_t pps_tick; static volatile uint32_t pps_seq;
 static double pps_tt; static int pps_new;   /* the last pulse in true time (capture units), not yet reported */
+#ifndef EFC_USE_GPS
+#define EFC_USE_GPS 1                          /* 1: the GPS PPS steers the OCXO when present (phase lock) */
+#endif
+/* GPS PPS phase against the OCXO second, unwrapped [s] (> 0: the OCXO second comes after the GPS second),
+   summed over the current minute for the OCXO loop */
+static double gps_ph_prev, gps_xun, gps_xsum; static int gps_have, gps_n;
 #endif
 static int lse_ok;
 #ifdef OCXO_REF
@@ -979,6 +985,15 @@ int main(void)
                         if (dt > 0.9 && dt < 1.1) fr = f1(b1, (1.0 - dt) * 1e9, 1);   /* > 0: OCXO slow */
                     }
                     t_prev = tt;
+                    {   /* phase of this pulse within the OCXO second: unwrapped, glitches (> 10 us step) dropped */
+                        double ph = fmod(tt * REF_CAP_S, 1.0);
+                        if (gps_have) {
+                            double st = -(ph - gps_ph_prev);
+                            st -= floor(st + 0.5);                 /* to -0.5 .. 0.5 s */
+                            if (fabs(st) < 1e-5) { gps_xun += st; gps_xsum += gps_xun; gps_n++; gps_ph_prev = ph; }
+                            else gps_have = 0;                     /* start again at the next pulse */
+                        } else { gps_have = 1; gps_ph_prev = ph; }
+                    }
                     uint32_t sec, us;
                     if (tk.synced && tk_time(&tk, (int64_t)(n2 * (TICKS_PER_BLOCK / 4)), &sec, &us)) {
                         double ms = us / 1000.0; if (ms >= 500) ms -= 1000;     /* > 0: e-CzasPL clock ahead */
@@ -1036,8 +1051,21 @@ int main(void)
                 nd = (rd2.state == COH_TRACK && dcf_verified() && rd2.cn0_dbhz >= EFC_DCF_CN0_MIN) ? nd + 1 : 0;
                 ne = (re.state == COH_TRACK && re.err_deg < 25) ? ne + 1 : 0;
                 int vd = nd > 2, ve = ne > 2;
-                int src = efc_minute2(&efc, vd, rd2.freq_hz / F_DCF, ve, re.freq_hz / F_CARRIER, 60.0);
-                static const char *SRC[] = { "none", "DCF77", "e-CzasPL", "DCF77+e-CzasPL" };
+                /* GPS PPS: >= 50 good pulses this minute -> the GPS steers (phase lock, efc_minute3) */
+                int ng = gps_n, vg = EFC_USE_GPS && ng >= 50;
+                double xg = ng ? gps_xsum / ng : 0;
+                gps_xsum = 0; gps_n = 0;
+                double yd = rd2.freq_hz / F_DCF, ye = re.freq_hz / F_CARRIER;
+                int src = efc_minute3(&efc, vg, xg, vd, yd, ve, ye, 60.0);
+                static const char *SRC[] = { "none", "DCF77", "e-CzasPL", "DCF77+e-CzasPL", "GPS" };
+                {   /* the three references against the OCXO, every minute (> 0: the OCXO runs slow against it);
+                       with the GPS steering, DCF77 and e-CzasPL here are their carriers against GPS */
+                    char g1[24], g2[24], g3[24], g4[24];
+                    snprintf(m, sizeof m, "GPS %s ppb, phase %s ns (%d pulses) | DCF77 %s ppb | e-CzasPL %s ppb",
+                             ng >= 50 ? f3(g1, efc.pyg * 1e9) : "-", ng >= 50 ? f1(g2, efc.gx * 1e9, 1) : "-", ng,
+                             vd ? f3(g3, yd * 1e9) : "-", ve ? f3(g4, ye * 1e9) : "-");
+                    put_line("REFS", m);
+                }
                 if (src == EFC_SRC_BOTH && efc.we <= 0) src = EFC_SRC_DCF77;   /* e-CzasPL weight 0: DCF77 steers */
                 char b9[16], b10[16];
                 snprintf(m, sizeof m, "EFC %s = %s V, %s, source %s (e-CzasPL weight %s), offset %s ppb, time error %s ns, slope %s ppb/code, loop %ld s | e-CzasPL-DCF77 %s ppb (%d min)",

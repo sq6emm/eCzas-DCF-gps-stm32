@@ -55,6 +55,14 @@
 #ifndef EFC_DBAD_BIG
 #define EFC_DBAD_BIG  20e-9       /* ... i.e. this far off (white night noise stays below: efcsim) */
 #endif
+#ifndef EFC_TAU_GPS
+#define EFC_TAU_GPS  600.0         /* PLL time constant while the GPS PPS steers: the NEO-7P PPS jitters
+                                      ~15-20 ns per pulse (1 Oct 2026); shorter copies it into the OCXO,
+                                      longer lets the OCXO's own wander through. Replay on the real OCXO
+                                      (host/efcgpsreplay, 1 Oct 14:53-17:43): time error rms 300 s 17 ns,
+                                      600 s 36 ns, 1000 s 97 ns, 2000 s 187 ns; simulation (host/efcgpssim,
+                                      2 days): 600 s 16 ns, 1000 s 40-47 ns, 3000 s 619 ns */
+#endif
 #define EFC_MAX 4095.0
 
 static double clampc(double c) { return c < 0 ? 0 : c > EFC_MAX ? EFC_MAX : c; }
@@ -69,10 +77,13 @@ void efc_init(efc_t *f, double code, double slope)
     f->vd = f->ve = 2e-18; f->pyd = f->pye = 0; f->hd = f->he = 0; f->we = 0; f->veff = 0; f->tau = EFC_TAU;
     f->dbad = 0;
     f->r10sum = f->r10prev = f->v10 = 0; f->r10n = f->r10gap = 0; f->h10 = 0;
+    f->gx_off = f->gx = 0; f->vg = 0; f->pyg = 0;
     if (slope != 0) { f->slope = slope; f->state = EFC_LOCK; f->skip = 0; }
 }
 
-int efc_minute2(efc_t *f, int vd, double yd, int ve, double ye, double T)
+/* the two stations: noise estimates, e-CzasPL's learned offset, which of them would steer (and with what y);
+   nothing is steered here */
+static int stations(efc_t *f, int vd, double yd, int ve, double ye, double T, double *yout)
 {
     /* minute-to-minute noise of each station (Allan-like: half the squared first difference) */
     if (vd) { if (f->hd) { double d = yd - f->pyd; f->vd += (0.5 * d * d - f->vd) / EFC_NOISE_N; } f->pyd = yd; }
@@ -117,8 +128,31 @@ int efc_minute2(efc_t *f, int vd, double yd, int ve, double ye, double T)
         }
     } else if (vd) { src = EFC_SRC_DCF77; y = yd; }
     else if (ve) { src = EFC_SRC_ECZAS; y = f->bn >= EFC_BIAS_INIT ? ye - f->bias : ye; f->we = 1; }
+    *yout = y;
+    return src;
+}
+
+int efc_minute2(efc_t *f, int vd, double yd, int ve, double ye, double T)
+{
+    double y; int src = stations(f, vd, yd, ve, ye, T, &y);
     efc_minute(f, src, y, T);
     return src;
+}
+
+int efc_minute3(efc_t *f, int vg, double xg, int vd, double yd, int ve, double ye, double T)
+{
+    double y; int src = stations(f, vd, yd, ve, ye, T, &y);   /* DCF77 / e-CzasPL stay ready as fallbacks */
+    if (!vg) { efc_minute(f, src, y, T); return src; }
+    /* the GPS PPS steers: xg = the measured phase (OCXO second behind the GPS second, > 0) with an arbitrary
+       constant; when the GPS (re)takes over, that constant is set so the loop's phase continues smoothly */
+    if (f->src != EFC_SRC_GPS || f->state != EFC_LOCK) f->gx_off = f->x - xg;
+    double x = xg + f->gx_off;
+    double yg = (x - f->x) / T;                       /* frequency of this minute (for the log / WAIT / CAL) */
+    if (f->src == EFC_SRC_GPS) { double d = yg - f->pyg; f->vg += (0.5 * d * d - f->vg) / EFC_NOISE_N; }
+    f->pyg = yg; f->gx = x;
+    f->we = 0; f->veff = f->vg;
+    efc_minute(f, EFC_SRC_GPS, yg, T);
+    return EFC_SRC_GPS;
 }
 
 static void to_wait(efc_t *f) { f->state = EFC_WAIT; f->n = 0; f->src = EFC_SRC_NONE; }
@@ -183,6 +217,14 @@ void efc_minute(efc_t *f, int src, double y, double T)
             break;
         }
         f->outliers = 0;
+        if (src == EFC_SRC_GPS) {                      /* phase measured directly: PI on it */
+            f->tau = EFC_TAU_GPS;
+            const double wn = 1.0 / f->tau, kp = 2 * 0.7 * wn, ki = wn * wn;
+            f->x = f->gx;
+            f->integ += ki * f->x * T;
+            f->target = clampc(f->cref + (kp * f->x + f->integ) / f->slope);
+            break;
+        }
         {
             double r = f->veff > 0 ? sqrt(f->veff / EFC_VREF) : 1;
             if (EFC_V10REF > 0 && f->we < 0.5 && f->v10 > 0) {      /* DCF77 steers */

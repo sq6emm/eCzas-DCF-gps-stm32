@@ -31,7 +31,7 @@
 #ifndef EFC_H
 #define EFC_H
 
-enum { EFC_SRC_NONE = 0, EFC_SRC_DCF77, EFC_SRC_ECZAS, EFC_SRC_BOTH };
+enum { EFC_SRC_NONE = 0, EFC_SRC_DCF77, EFC_SRC_ECZAS, EFC_SRC_BOTH, EFC_SRC_GPS };
 enum { EFC_WAIT = 0, EFC_CAL_RAMP, EFC_CAL_MEAS, EFC_LOCK, EFC_FAIL };
 
 typedef struct {
@@ -49,6 +49,7 @@ typedef struct {
     int    dbad;                   /* minutes left in which DCF77 is not trusted (it was the wrong one) */
     double r10sum, r10prev, v10;   /* 10-min means of e-CzasPL - DCF77 and their Allan variance */
     int    r10n, r10gap, h10;
+    double gx_off, gx, vg, pyg;   /* GPS: phase offset (continuity at take-over), last phase, minute noise */
 } efc_t;
 
 /* slope 0: calibrate first; otherwise the known slope [fraction per code] -> straight to LOCK */
@@ -57,6 +58,10 @@ void efc_init(efc_t *f, double code, double slope);
 void efc_minute(efc_t *f, int src, double y, double T);
 /* once a minute: both stations; vd / ve = locked, yd / ye = measured fraction. Returns EFC_SRC_* used. */
 int  efc_minute2(efc_t *f, int vd, double yd, int ve, double ye, double T);
+/* once a minute with a GPS PPS: vg = enough pulses this minute, xg = the PPS phase against the OCXO second,
+   minute mean [s] (> 0: the OCXO second comes after the GPS second; any constant). With vg the GPS steers
+   (PI on the phase, EFC_TAU_GPS); without, as efc_minute2 (DCF77 / e-CzasPL). Returns EFC_SRC_*. */
+int  efc_minute3(efc_t *f, int vg, double xg, int vd, double yd, int ve, double ye, double T);
 /* every dt seconds: the DAC code to write now */
 int  efc_tick(efc_t *f, double dt);
 const char *efc_state_txt(const efc_t *f);
