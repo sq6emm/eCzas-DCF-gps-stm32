@@ -63,41 +63,52 @@ against the nominal 48000, ~1 ms per 10-min file), not TDF. At this level the te
 real ALS162 transmissions, not its weak-signal margin: for that see the noise bench above (0 % below
 ~20 dB-Hz); TDF on the existing NUCLEO rods was only 7-11 dB-Hz, so a 162 kHz rod is needed.
 
-## Second timing: e-CzasPL vs DCF77, TDF and GPS (status 1 Oct 2026, after two independent reviews)
+## Second timing: e-CzasPL vs DCF77, TDF and GPS (status 1 Oct 2026 evening: two reviews + the 19 ms ramp)
 
 **Definitions used.** DCF77: the second = start of the carrier reduction (PTB); the phase code starts
-0.2 s later (sequence 00000100011..., chip 0 = 0). TDF: zero crossing of the first triangular element, 50 ms
-after its start (from secondary sources). **e-CzasPL: the second = START of the first linear phase ramp**
-of the frame - every bit change is a linear ramp of 16.6 ms (measured on the NUCLEO's dumps), and GUM writes
-"transmisja rozpoczyna się od początku sekundy" (transmission starts at the beginning of the second).
-The ramp middle is ~8 ms later. The 0x680C start sequence of GUM's PDF is not transmitted (idle phase flat
-up to the frame).
+0.2 s later (sequence 00000100011..., chip 0 = 0). TDF: zero crossing of the first triangular element,
+50 ms after its start (secondary sources). **e-CzasPL: the second = START of the first linear phase ramp**
+of the frame (GUM: "transmisja rozpoczyna się od początku sekundy"; the '0' of the 1-0-1 bits starts
+exactly 0.5 s later - GUM's agreed moment for loading the time). The PSK is one-sided (idle carrier = one
+level, the other -36 deg) and every bit change is a **linear ramp of ~19 ms**: 18.6 ms fitted on the
+IC-7610 (60 frames), 19 ms according to GUM (stated to J. Sadowski, see below; not in the
+specification). The 0x680C start sequence of GUM's document is not transmitted (doc/GUM-issue-1 in the
+eCzasPL repo, observation 2).
 
-**IC-7610, both receivers in one stereo file** (`tools/tdf_vs_eczas_timing.py` with the bias-free models of
-`tools/timing_models.py`; rerun 1 Oct on the 30 Sep recordings; MAIN - SUB delay 0.00 +- 0.05 ms at 226.000):
+Distances from the receiver's GPS fix (Wroclaw), ground wave at c: DCF77 Mainflingen 573.2 km 1.912 ms,
+TDF Allouis 1156.1 km 3.856 ms, e-CzasPL Solec Kujawski 229.3 km 0.765 ms.
+
+**IC-7610, both receivers in one stereo file** (`tools/tdf_vs_eczas_timing.py`, bias-free models of
+`tools/timing_models.py` with the 18.6 ms ramp; 30 Sep recordings; MAIN - SUB delay 0.00 +- 0.05 ms):
 
 | arrival at Wroclaw | result | files |
 |---|---|---|
-| e-CzasPL - DCF77 | **+9.85 ms** | 30 Sep 16:00-17:20, 8 good files +9.81 ... +9.90 (17:10 cut short) |
-| e-CzasPL - TDF | **+8.25 ms** | 30 Sep 19:10-21:00, 11 files, spread 0.10 |
-| TDF - DCF77 direct | -0.03 ms (files +1.45 / -1.51) | 22:17-22:28, night: DCF77 unsteady |
-| TDF - DCF77 from the two above | +1.60 ms | |
+| e-CzasPL - DCF77 | **+8.86 ms** | 30 Sep 16:00-17:20 (9 files, 8 good) |
+| e-CzasPL - TDF | **+7.24 ms** | 30 Sep 19:10-21:00, 11 files, spread 0.10 |
+| TDF - DCF77 from the two above | +1.61 ms | |
 
-At the transmitters (a station further away must have sent earlier: emission difference = arrival
-difference + its path delay - e-CzasPL's; ground wave DCF77 580 km 1.93 ms, TDF 1162 km 3.87 ms, e-CzasPL
-234 km 0.78 ms): **e-CzasPL is 11.00 ms after DCF77 and 11.34 ms after TDF**; TDF - DCF77 = -0.34 ms.
+At the transmitters (a station further away must have sent earlier): **e-CzasPL 10.00 ms after DCF77,
+10.33 ms after TDF**; TDF - DCF77 = -0.33 ms.
 
-**GPS PPS on the NUCLEO** (u-blox NEO-7P, cable delay 25 ns; firmware 16fd3b4; 1 Oct 13:44-14:44, 3607 s):
-DCF77 second -2.181 ms (physics -1.93: **0.25 ms receiver/path residual**, likely the DCF77 rod's tuned-circuit
-group delay - open); e-CzasPL second (16fd3b4 still adds 7.4 ms, see below) -20.105 ms -> ramp start arrives
-**12.71 ms after UTC** -> ~11.9 ms late at the transmitter (minus 0.78 ms path; receiver terms ~0.1 ms).
-OCXO (DCF77-steered) vs GPS over the hour: +0.04 ppb.
+**GPS PPS on the NUCLEO** (u-blox NEO-7P, cable delay 25 ns; 1 Oct afternoon, firmware 6bd5276):
+DCF77 second -2.09 ... -2.18 ms (physics -1.912: **0.18-0.27 ms receiver/path residual**, likely the DCF77
+rod's group delay - open). e-CzasPL -12.65 ms as reported by 6bd5276, whose second is 1.38 ms after the
+true ramp start (16 ms ramp model in the eCzas core; corrected by -1380 us in c4613a2, not yet flashed)
+-> ramp start 11.27 ms after UTC -> **10.51 ms late at the transmitter**.
 
-**Result: e-CzasPL's second (ramp start) leaves the transmitter ~11.0-11.9 ms after UTC** (DCF77 via the
-IC-7610 11.0, TDF 11.3, GPS via the NUCLEO 11.9; the ~0.9 ms spread is the uncalibrated per-frequency
-delays of the two receivers). With the ramp-middle convention add ~8 ms (~19.8 ms).
+**Result: e-CzasPL's second (ramp start) leaves the transmitter ~10.0-10.5 ms after UTC** (DCF77 10.00,
+TDF 10.33, GPS 10.51; the spread is the receivers' uncalibrated per-frequency delays). GUM's web page
+states "<0,01 s" end-receiver synchronisation accuracy. With the ramp-middle convention add ~9.3 ms.
+
+**Independent work:** J. Sadowski, "Receiver network for assessing the accuracy of time distribution in
+e-Czas Radio service", Metrol. Meas. Syst. 32(4), 2025, DOI 10.24425/mms.2025.155800 (Gdansk University
+of Technology). GNSS-disciplined direct-sampling receivers; same reading of the 1-0-1 reference and the
+same ramp-start convention; GUM gave the author the 19 ms ramp; arrival-time jitter 18 us at 150 km.
+It deliberately publishes no absolute offset against UTC ("emission parameters are changed within small
+limits by the system operator") - the ~10 ms above is, as far as we know, the first such measurement.
 
 History (superseded; kept so old notes can be read):
+- 1 Oct afternoon: ~11.0-11.9 ms (ramp start) with a 16.6 ms ramp model - ~0.8-1.0 ms late (the ramp is ~19 ms).
 - 30 Sep: +16.61 / +16.48 ms (e-CzasPL - DCF77 / - TDF at the receiver) - a step-model fit that marked the
   ramp MIDDLE with a ~-0.2 ms bias, and (DCF77 only) a phase-code sequence missing chip 0 (1.548 ms).
 - "~17.8 ms" and "~19.3-19.6 ms late" (30 Sep / 1 Oct): ramp middle, built on those errors.
@@ -109,7 +120,7 @@ History (superseded; kept so old notes can be read):
   (2) the timing chain - DCF77 chain right (AM onset and phase code agree within 0.05 ms), the fixes of
   6bd5276, and the definitions above.
 
-### Why is e-CzasPL ~11-12 ms late?
+### Why is e-CzasPL ~10 ms late?
 
 - **Not a time scale.** TAI/GPS/UTC differ by whole seconds. UT1 - UTC is -19.3 ms (28 Sep) ... -21.6 ms
   (30 Sep) (IERS Bulletin A) but moves ~1.1 ms/day; e-CzasPL moves ~0.1 ms/day (below), so not UT1.
@@ -117,12 +128,12 @@ History (superseded; kept so old notes can be read):
   14:00 - 30 Sep 22:30: -0.117 +- 0.010 ms/day; IC-7610 29 Sep -> 30 Sep: +0.10 ms/day; both differences
   of the same method, so the biases above cancel). Same sign and size as e-CzasPL's carrier being
   ~0.85 ppb low against DCF77. A transmitter steered to UTC (GNSS) would not drift; a clock set only now
-  and then would - at 0.1 ms/day, 11 ms accumulate in ~4 months. Outside reports of 10-25 ms late (PA3FWM)
+  and then would - at 0.1 ms/day, 10 ms accumulate in ~3-4 months. Outside reports of 10-25 ms late (PA3FWM)
   fit a value that changes.
 - So most likely the frame timing comes from a clock not continuously steered to UTC at the ms level
   (free-running or rarely corrected). GUM's stated accuracy is "kilku lub kilkunastu milisekund" (a few to
-  over a dozen ms), so ~11-12 ms is within it. Watching for weeks tells: steady drift = free running, a
+  over a dozen ms), so ~10 ms is at the edge of it (and of the page's "<0,01 s"). Watching for weeks tells: steady drift = free running, a
   step = a correction.
-- Open: GUM's own definition (ramp start or middle, ramp length - we measure 16.6 ms), the 0.25 ms DCF77
+- Open: GUM's own definition (ramp start or middle; ramp length 19 ms per GUM, 18.6 ms measured), the 0.25 ms DCF77
   residual (rod group delay?), per-frequency receiver delays (a GPS-locked synthetic test signal at the
   antenna input would measure them end to end).
