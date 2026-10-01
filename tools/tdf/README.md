@@ -92,6 +92,15 @@ second definition (zero crossing, from secondary sources only) and the night pat
 
 ### Why ~17 ms? (1 Oct 2026)
 
+> **CORRECTION 1 Oct 2026, ~12:40 (GPS PPS, NEO-7P):** all DCF77 phase-code times above (IC-7610 and
+> NUCLEO) were **1.548 ms late**: our PRN generator missed PTB's chip 0 (sequence 00000100011...,
+> fixed in 16fd3b4). Corrected: e-CzasPL - DCF77 at the receiver **+18.15 ms** (16.61 + 1.55; 29 Sep
+> rerun +18.05), at the transmitters **~19.3 ms**; e-CzasPL - TDF unchanged (+16.48 receiver, ~19.6 ms
+> at the transmitters); TDF - DCF77 at the transmitters **~-0.3 ms** (not -1.8). GPS directly: the
+> NUCLEO's e-CzasPL second arrives 25.18 - 5.00 (PPS anchor bug, a03170e) = ~20.2 ms after UTC ->
+> ~19.4 ms late at the transmitter. All three references agree: **e-CzasPL is ~19.3-19.6 ms late**.
+> The ramp-start convention below (~9 ms earlier) and the drift (~0.1 ms/day) still apply.
+
 - **Not a time scale.** TAI/GPS/UTC differ by whole seconds. UT1 - UTC is -19.3 ms (28 Sep) ... -21.6 ms
   (30 Sep) (IERS Bulletin A), close in size, but it moves ~1.1 ms/day; e-CzasPL - DCF77 moved ~0.1 ms/day
   (below), so e-CzasPL does not follow UT1.
