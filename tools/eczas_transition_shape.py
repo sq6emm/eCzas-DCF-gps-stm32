@@ -10,7 +10,7 @@ after; sign-normalised): the detrended carrier phase around T + 20 ms x k, as a 
 Prints the 5/10/50/90/95 % points relative to the fitted edge and the median T - DCF77 second.
 Old result (30 Sep, step-model fit, which marked the ramp MIDDLE with a ~-0.2 ms bias): ramp ~18 ms,
 -9 ... +9 ms around the fitted edge, step 31 deg. Since 1 Oct 2026 the frame start is fitted with the
-continuous 16.6 ms ramp model (tools/timing_models.py) and marks the ramp START; the shape below is then
+continuous ramp model (tools/timing_models.py, 18.6 ms since 1 Oct evening) and marks the ramp START; the shape below is then
 relative to the ramp start (an independent review measured 16.6 ms, -7.9 ... +8.7 ms around the middle,
 on the NUCLEO's own dumps).
 """
@@ -115,7 +115,7 @@ def eczas_frames(ze, name, t_name):
         seg = ph[a:b]; tt = np.arange(a, b) / FS2
         seg = seg - np.polyval(np.polyfit(tt, seg, 1), tt)
         bits = np.array(make_frame(N, 2), float) * 2 - 1
-        def score(T):                                # 16.6 ms linear ramps STARTING at the bit edges
+        def score(T):                                # 18.6 ms linear ramps (timing_models.E_RAMP) STARTING at the bit edges
             m, mk = tm.eczas_phase(tt, T, bits)
             m = (m - m[mk].mean()) * mk
             return float(np.dot(seg, m))
@@ -131,7 +131,7 @@ def eczas_frames(ze, name, t_name):
 
 
 def eczas_frames_one(ze, ph, name, t_name, N):
-    """frame start = ramp START of the first bit change (continuous 16.6 ms ramp model, timing_models)"""
+    """frame start = ramp START of the first bit change (continuous 18.6 ms ramp model, timing_models)"""
     slot = EPOCH + dt.timedelta(seconds=3 * N)
     t0 = (slot - t_name).total_seconds() + 0.05
     a = int((t0 - 0.2) * FS2); b = int((t0 + 2.2) * FS2)

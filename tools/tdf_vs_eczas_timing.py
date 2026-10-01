@@ -15,7 +15,7 @@ DCF77: the phase code (512 chips of 120 carrier cycles = 1.548 ms, the PTB seque
 200 ms after the second; per second the fit of |correlation| (the data bit inverts the sequence) of the
 carrier phase with the chip sequence, tau on a 0.05 ms grid -> second = code start - 200 ms.
 e-CzasPL: every regular time frame the processor decoded: the ideal frame from its N (make_frame), each bit
-change a 16.6 ms linear phase ramp STARTING at the bit edge (measured shape); fit of the start to the
+change a 18.6 ms linear phase ramp STARTING at the bit edge (measured, GUM: 19 ms); fit of the start to the
 carrier phase with a linear trend removed -> the slot's start = the ramp start (GUM: 'transmission starts at
 the beginning of the second'). Since 1 Oct 2026 (review): continuous models (tools/timing_models.py),
 parabolic peak interpolation; the old step-model fit marked the ramp MIDDLE with a -0.2 ms bias.
@@ -126,7 +126,7 @@ def eczas_frames(ze, name, t_name):
         seg = ph[a:b]; tt = np.arange(a, b) / FS2
         seg = seg - np.polyval(np.polyfit(tt, seg, 1), tt)
         bits = np.array(make_frame(N, 2), float) * 2 - 1
-        def score(T):                                # 16.6 ms linear ramps STARTING at the bit edges
+        def score(T):                                # 18.6 ms linear ramps (timing_models.E_RAMP) STARTING at the bit edges
             m, mk = tm.eczas_phase(tt, T, bits)
             m = (m - m[mk].mean()) * mk
             return float(np.dot(seg, m))

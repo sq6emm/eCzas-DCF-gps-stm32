@@ -12,7 +12,9 @@ neighbours.
 """
 import numpy as np
 
-E_RAMP = 0.0166          # e-CzasPL phase ramp per bit change [s] (NUCLEO dumps 1 Oct: linear, 16.6 ms)
+E_RAMP = 0.0186          # e-CzasPL phase ramp per bit change [s]: 18.6 ms fitted on the IC-7610 (1 Oct 2026, 60 frames,
+                         # the edge into the '0' of 1-0-1); GUM: 19 ms (Sadowski 2025, MMS 32(4), DOI 10.24425/mms.2025.155800).
+                         # 16.6 ms (NUCLEO estimate, used until 1 Oct) put the ramp start ~0.8 ms late
 E_BIT = 0.020            # e-CzasPL bit [s]
 D_CHIP = 120.0 / 77500.0 # DCF77 phase-code chip [s]
 
