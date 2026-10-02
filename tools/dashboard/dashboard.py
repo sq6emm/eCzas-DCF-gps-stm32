@@ -361,7 +361,7 @@ def render(rng):
     if bl: h1 += [plt.Line2D([], [], ls=":", color="0.5")]; l1 += ["NUCLEO reboot / flash"]
     ax.legend(h1, l1, loc="lower right", fontsize=8)
     ax.xaxis.set_major_formatter(xfmt); fig.autofmt_xdate()
-    ax.set_title("e-CzasPL: does the second drift as the 225 kHz carrier predicts? (GUM: both from one OCXO)\n" + txt, fontsize=10, loc="left")
+    ax.set_title("e-CzasPL: does the second drift as the 225 kHz carrier predicts? (GUM: both temporarily from one OCXO, until the rubidium replacement)\n" + txt, fontsize=10, loc="left")
     site_legend(fig)
     out["ecz"] = png(fig)
 
@@ -444,8 +444,8 @@ a.on{{font-weight:bold}} h2{{margin-top:28px}}</style></head><body>
 <h2>Stability (Allan deviation)</h2><img src="adev.png?r={r}&v={v}">
 <h2>OCXO time error against GPS</h2><img src="phase.png?r={r}&v={v}">
 <h2>OCXO free-running frequency</h2><img src="free.png?r={r}&v={v}">
-<h2>e-CzasPL (225 kHz): carrier and second from one OCXO?</h2>
-<p>GUM, 2 Oct 2026: the carrier and the frame start come from one OCXO for now (rubidium planned). If so, the second must drift exactly as the carrier's
+<h2>e-CzasPL (225 kHz): carrier and second from one OCXO (temporary, until the rubidium replacement)?</h2>
+<p>GUM, 2 Oct 2026: the carrier and the frame start are TEMPORARILY taken from one OCXO, while the transmitter waits for its rubidium replacement source. As long as that holds, the second must drift exactly as the carrier's
 frequency error accumulates: red = the carrier's accumulated time error (from its frequency vs GPS, precise to nanoseconds), blue = the measured lateness
 of the second vs the GPS PPS (noisy: tens of us per hour), both set to 0 at the start. They should run together; the match becomes clear after a few days
 (-0.8 ppb = 69 us/day). The ~32 us that the firmware before 2 Oct 08:04 added to all station timings is removed, and the first 30 min after each NUCLEO boot (settling) are left out.</p>
