@@ -288,33 +288,42 @@ def render(rng):
         lat = np.array([-pps[k][0] / pps[k][1] - PROP_E for k in pk])       # ms late at the transmitter
         bl = [b for b in boots if b >= t0]
     tl = np.array([dt.datetime.fromtimestamp(k * 60, dt.timezone.utc) for k in pk])
-    fig, axs = plt.subplots(2, 1, figsize=(12, 7), sharex=True)
-    ax = axs[0]; shade_night(ax, t0, now)
+    fig, ax = plt.subplots(figsize=(12, 5.5))
+    shade_night(ax, t0, now)
+    ax2 = ax.twinx()
     ev = e[~np.isnan(e)] if len(t) else np.array([])
-    if len(t):
-        ax.plot(t, e, ".", ms=2.5, color="tab:red", alpha=0.3, label="1-min")
-        ax.plot(t, rolling(e, 60, 40), "-", lw=1.8, color="darkred", label="60-min mean")
-        if len(ev) > 10:
-            lo, hi = np.percentile(ev, [1, 99]); pad = 0.3 * (hi - lo) + 0.2; ax.set_ylim(lo - pad, hi + pad)
-    ax.axhline(0, color="k", lw=0.8)
-    ax.set_ylabel("ppb"); ax.grid(alpha=0.3); ax.legend(loc="upper left", fontsize=8)
-    sec = ax.secondary_yaxis("right", functions=(lambda x: x * 0.225, lambda x: x / 0.225)); sec.set_ylabel("mHz at 225 kHz")
-    ax.set_title("e-CzasPL 225 kHz carrier frequency - GPS: " + (f"mean {ev.mean():+.3f} ppb ({ev.mean()*0.225:+.3f} mHz), median {np.median(ev):+.3f} ppb" if len(ev) > 2 else "-"), fontsize=10, loc="left")
-    ax = axs[1]; shade_night(ax, t0, now)
     txt = "-"
-    if len(pk) > 5:
-        ax.plot(tl, lat, ".", ms=2.5, color="tab:blue", alpha=0.35, label="1-min mean of the per-second values")
-        ax.plot(tl, rolling(lat, 60, 40), "-", lw=1.8, color="navy", label="60-min mean")
+    if len(t):                                             # left axis: carrier - GPS
+        ax.plot(t, rolling(e, 60, 40), "-", lw=1.8, color="tab:red", label="carrier - GPS, 60-min mean (left axis)")
+    if len(pk) > 5:                                        # right axis: second misalignment
+        ax2.plot(tl, lat, ".", ms=2, color="tab:blue", alpha=0.25)
+        ax2.plot(tl, rolling(lat, 60, 40), "-", lw=1.8, color="navy", label="second late vs GPS PPS, 60-min mean (right axis)")
         x = np.array([k / 1440.0 for k in pk]); A = np.polyfit(x, lat, 1)
-        ax.plot(tl, np.polyval(A, x), "--", color="k", lw=1, label=f"fit: {A[0]:+.3f} ms/day")
-        pred = -ev.mean() * 0.0864 if len(ev) > 2 else float("nan")
-        txt = f"now {np.mean(lat[-10:]):.3f} ms late; drift {A[0]:+.3f} ms/day measured, {pred:+.3f} ms/day predicted from the carrier offset"
-        lo, hi = np.percentile(lat, [1, 99]); pad = 0.3 * (hi - lo) + 0.05; ax.set_ylim(lo - pad, hi + pad)
-    for b in bl: ax.axvline(b, color="0.5", ls=":", lw=1)
-    if bl: ax.plot([], [], ":", color="0.5", label="NUCLEO reboot / flash")
-    ax.set_ylabel("ms late"); ax.grid(alpha=0.3); ax.legend(loc="upper left", fontsize=8)
+        # the misalignment the carrier predicts: integral of -(carrier offset) over time (one OCXO drives both),
+        # offset to the measured mean (only its shape/slope is predicted)
+        em = {int(k): v for k, v in zip(keys, e) if not np.isnan(v)}
+        fill = ev.mean() if len(ev) else 0.0
+        mins = np.arange(pk[0], pk[-1] + 1)
+        cum = np.cumsum([-em.get(int(m), fill) * 60e-9 * 1e3 for m in mins])   # ms
+        cum_at = dict(zip(mins, cum))
+        pred = np.array([cum_at[k] for k in pk])
+        pred += np.mean(lat) - np.mean(pred)               # same mean as the measurement: compare the slopes/shape
+        ax2.plot(tl, pred, "--", lw=1.4, color="k", label="second predicted from the carrier (integral of its offset)")
+        txt = (f"carrier {ev.mean():+.3f} ppb ({ev.mean()*0.225:+.3f} mHz) | second now {np.mean(lat[-10:]):.3f} ms late | "
+               f"drift {A[0]:+.3f} ms/day measured, {-ev.mean()*0.0864:+.3f} predicted")
+        lo, hi = np.percentile(lat, [1, 99]); pad = 0.4 * (hi - lo) + 0.05; ax2.set_ylim(lo - pad, hi + pad)
+    if len(ev) > 10:
+        r60 = rolling(e, 60, 40); r60 = r60[~np.isnan(r60)]
+        lo, hi = (r60.min(), r60.max()) if len(r60) else (-1, 0); pad = 0.6 * (hi - lo) + 0.3
+        ax.set_ylim(lo - pad, hi + pad)
+    for b_ in bl: ax.axvline(b_, color="0.5", ls=":", lw=1)
+    ax.set_ylabel("carrier - GPS [ppb]", color="tab:red"); ax2.set_ylabel("e-CzasPL second after the GPS second [ms]", color="navy")
+    ax.grid(alpha=0.3)
+    h1, l1 = ax.get_legend_handles_labels(); h2, l2 = ax2.get_legend_handles_labels()
+    if bl: h1 += [plt.Line2D([], [], ls=":", color="0.5")]; l1 += ["NUCLEO reboot / flash"]
+    ax.legend(h1 + h2, l1 + l2, loc="lower left", fontsize=8)
     ax.xaxis.set_major_formatter(xfmt); fig.autofmt_xdate()
-    ax.set_title("e-CzasPL second (start of the 16-bit sync) after the GPS second, at the transmitter (path 0.765 ms removed)\n" + txt, fontsize=10, loc="left")
+    ax.set_title("e-CzasPL 225 kHz against GPS: carrier frequency and second (start of the 16-bit sync, at the transmitter)\n" + txt, fontsize=10, loc="left")
     site_legend(fig)
     out["ecz"] = png(fig)
 
