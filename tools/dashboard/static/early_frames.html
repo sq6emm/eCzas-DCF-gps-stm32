@@ -115,26 +115,32 @@ h2 .sl { color: var(--muted); font-weight: 500; }
 
 <h2>Co się dzieje <span class="sl">/ What happens</span></h2>
 <div class="timeline">
-<svg viewBox="0 0 900 200" role="img" aria-label="Slot S zawiera ramkę slotu S+3 od 0,5–0,6 s; slot S+3 jest pusty / Slot S carries the frame of slot S+3 from 0.5–0.6 s; slot S+3 is empty">
+<svg viewBox="0 0 900 230" role="img" aria-label="Slot S zawiera ramkę slotu S+3 od 0,5–0,6 s; slot S+3 jest pusty / Slot S carries the frame of slot S+3 from 0.5–0.6 s; slot S+3 is empty">
   <style>
-    .t{font:12px var(--mono);fill:var(--muted)} .h{font:600 13px var(--sans);fill:var(--fg)}
+    .t{font:12px var(--mono);fill:var(--muted)} .h{font:600 12.5px var(--sans);fill:var(--fg)}
     .ln{stroke:var(--rule);stroke-width:1} .tick{stroke:var(--muted);stroke-width:1}
     .reg{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1} .early{fill:var(--warn-soft);stroke:var(--warn);stroke-width:1.5}
     .empty{fill:none;stroke:var(--muted);stroke-width:1;stroke-dasharray:4 4}
   </style>
+  <!-- 0.5-0.6 s bracket above slot S -->
+  <line class="tick" x1="270" y1="40" x2="309" y2="40"/><line class="tick" x1="270" y1="34" x2="270" y2="46"/><line class="tick" x1="309" y1="34" x2="309" y2="46"/>
+  <text class="t" x="316" y="44">0,50–0,60 s</text>
+  <!-- frames -->
+  <rect class="reg" x="60" y="62" width="134" height="40" rx="3"/><text class="t" x="127" y="79" text-anchor="middle">zwykła ramka</text><text class="t" x="127" y="94" text-anchor="middle">normal frame</text>
+  <rect class="early" x="309" y="62" width="134" height="40" rx="3"/><text class="h" x="376" y="79" text-anchor="middle">ramka slotu S+3</text><text class="t" x="376" y="94" text-anchor="middle">frame of S+3</text>
+  <rect class="empty" x="480" y="62" width="134" height="40" rx="3"/><text class="t" x="547" y="79" text-anchor="middle">pusty</text><text class="t" x="547" y="94" text-anchor="middle">empty</text>
+  <rect class="reg" x="690" y="62" width="134" height="40" rx="3"/><text class="t" x="757" y="79" text-anchor="middle">zwykła ramka</text><text class="t" x="757" y="94" text-anchor="middle">normal frame</text>
+  <!-- time axis with slot starts -->
   <line class="ln" x1="40" y1="120" x2="880" y2="120"/>
-  <line class="tick" x1="60" y1="112" x2="60" y2="128"/><text class="t" x="60" y="146" text-anchor="middle">S−3</text>
-  <line class="tick" x1="270" y1="112" x2="270" y2="128"/><text class="t" x="270" y="146" text-anchor="middle">S</text>
-  <line class="tick" x1="480" y1="112" x2="480" y2="128"/><text class="t" x="480" y="146" text-anchor="middle">S+3</text>
-  <line class="tick" x1="690" y1="112" x2="690" y2="128"/><text class="t" x="690" y="146" text-anchor="middle">S+6</text>
-  <text class="t" x="880" y="146" text-anchor="end">początki slotów co 3 s / slot starts, 3 s apart (UTC)</text>
-  <rect class="reg" x="60" y="70" width="134" height="36" rx="3"/><text class="t" x="127" y="86" text-anchor="middle">zwykła ramka</text><text class="t" x="127" y="100" text-anchor="middle">normal frame</text>
-  <rect class="early" x="309" y="70" width="134" height="36" rx="3"/><text class="h" x="376" y="86" text-anchor="middle">ramka slotu S+3</text><text class="t" x="376" y="100" text-anchor="middle">frame of S+3</text>
-  <rect class="empty" x="480" y="70" width="134" height="36" rx="3"/><text class="t" x="547" y="86" text-anchor="middle">pusty</text><text class="t" x="547" y="100" text-anchor="middle">empty</text>
-  <rect class="reg" x="690" y="70" width="134" height="36" rx="3"/><text class="t" x="757" y="86" text-anchor="middle">zwykła ramka</text><text class="t" x="757" y="100" text-anchor="middle">normal frame</text>
-  <line class="tick" x1="270" y1="52" x2="309" y2="52"/><line class="tick" x1="270" y1="46" x2="270" y2="58"/><line class="tick" x1="309" y1="46" x2="309" y2="58"/>
-  <text class="t" x="290" y="38" text-anchor="middle">0,50–0,60 s</text>
-  <path d="M 376 168 Q 430 182 480 168" fill="none" stroke="var(--warn)" stroke-width="1.2"/><text class="t" x="430" y="192" text-anchor="middle">2,40–2,50 s za wcześnie / early</text>
+  <line class="tick" x1="60" y1="112" x2="60" y2="128"/><text class="t" x="60" y="144" text-anchor="middle">S−3</text>
+  <line class="tick" x1="270" y1="112" x2="270" y2="128"/><text class="t" x="270" y="144" text-anchor="middle">S</text>
+  <line class="tick" x1="480" y1="112" x2="480" y2="128"/><text class="t" x="480" y="144" text-anchor="middle">S+3</text>
+  <line class="tick" x1="690" y1="112" x2="690" y2="128"/><text class="t" x="690" y="144" text-anchor="middle">S+6</text>
+  <!-- how early: from the early frame's start to its own slot start -->
+  <line x1="309" y1="168" x2="480" y2="168" stroke="var(--warn)" stroke-width="1.2"/>
+  <line x1="309" y1="162" x2="309" y2="174" stroke="var(--warn)" stroke-width="1.2"/><line x1="480" y1="162" x2="480" y2="174" stroke="var(--warn)" stroke-width="1.2"/>
+  <text class="t" x="496" y="172">2,40–2,50 s za wcześnie / early</text>
+  <text class="t" x="40" y="212">początki slotów co 3 s (UTC) / slot starts, 3 s apart (UTC)</text>
 </svg>
 </div>
 <div class="bi">
