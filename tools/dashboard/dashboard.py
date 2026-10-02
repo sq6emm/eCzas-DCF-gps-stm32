@@ -298,11 +298,11 @@ a.on{{font-weight:bold}} h2{{margin-top:28px}}</style></head><body>
 <h1>NUCLEO receiver: carriers against GPS, decodes per hour</h1>
 <p>range: {links} &middot; updated {upd} UTC (charts redrawn at most every {redraw} s, page reloads every 5 min) &middot; source: rx.log, GPS lock since {gps_from} UTC; grey = night 18-06 UTC</p>
 {summary_cur}
-<h2>Carrier frequency against GPS</h2><img src="/carriers.png?r={r}&v={v}">
-<h2>Stability (Allan deviation)</h2><img src="/adev.png?r={r}&v={v}">
-<h2>OCXO time error against GPS</h2><img src="/phase.png?r={r}&v={v}">
-<h2>OCXO free-running frequency</h2><img src="/free.png?r={r}&v={v}">
-<h2>Decodes vs expected, per hour</h2><img src="/decodes.png?r={r}&v={v}">
+<h2>Carrier frequency against GPS</h2><img src="carriers.png?r={r}&v={v}">
+<h2>Stability (Allan deviation)</h2><img src="adev.png?r={r}&v={v}">
+<h2>OCXO time error against GPS</h2><img src="phase.png?r={r}&v={v}">
+<h2>OCXO free-running frequency</h2><img src="free.png?r={r}&v={v}">
+<h2>Decodes vs expected, per hour</h2><img src="decodes.png?r={r}&v={v}">
 <h2>Hourly table (latest first)</h2>{table}
 </body></html>"""
 
@@ -317,11 +317,14 @@ class H(BaseHTTPRequestHandler):
             c = get(rng)
         except Exception as ex:
             self.send_response(500); self.end_headers(); self.wfile.write(f"error: {ex}".encode()); return
-        name = u.path.strip("/").removesuffix(".png")
-        if u.path.endswith(".png") and name in c[1]:
+        # works behind a reverse proxy under any prefix (e.g. /others/nucleo/): only the last path element
+        # counts, and the page uses relative links
+        last = u.path.rsplit("/", 1)[-1]
+        name = last.removesuffix(".png")
+        if last.endswith(".png") and name in c[1]:
             body, ctype = c[1][name], "image/png"
-        elif u.path in ("/", "/index.html"):
-            links = " ".join(f'<a class="{"on" if k == rng else ""}" href="/?r={k}">{"all" if k == "all" else k + " h"}</a>' for k in RANGES)
+        elif last in ("", "index.html"):
+            links = " ".join(f'<a class="{"on" if k == rng else ""}" href="?r={k}">{"all" if k == "all" else k + " h"}</a>' for k in RANGES)
             cur, table = c[2].split("<table>", 1) if "<table>" in c[2] else (c[2], "")
             body = PAGE.format(links=links, upd=dt.datetime.fromtimestamp(c[0], dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
                                redraw=REDRAW, gps_from=GPS_FROM, summary_cur=cur, r=rng, v=int(c[0]),
