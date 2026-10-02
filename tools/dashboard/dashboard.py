@@ -307,49 +307,61 @@ def render(rng):
     site_legend(fig)
     out["free"] = png(fig)
 
-    # 3c) e-CzasPL (225 kHz) against GPS: carrier frequency and second misalignment (GUM 2 Oct 2026: both come
-    #     from one OCXO for now -> the second drifts at -carrier offset x 86400 s per day)
+    # 3c) e-CzasPL (225 kHz): does the second drift as the carrier says? GUM, 2 Oct 2026: carrier and frame start
+    #     come from one OCXO for now. Both as accumulated time error on ONE axis [us]:
+    #     carrier: x_c(t) = -integral of (carrier - GPS) dt (a slow carrier makes every second longer -> later);
+    #     second:  its lateness vs the GPS PPS minus its value at the start, as 1-h and 3-h means.
+    #     Firmware before 345584c (2 Oct 08:04:27) put ~32 us extra on all station timings (review 3): removed.
+    FIX_T, FIX_US = ts("2026-10-02T08:04:27").timestamp() / 60, 32.0
     with lock:
-        pk = [k for k in sorted(pps) if k >= r0 and pps[k][1] >= 30]
-        lat = np.array([-pps[k][0] / pps[k][1] - PROP_E for k in pk])       # ms late at the transmitter
+        bm = [b.timestamp() / 60 for b in boots]
+        settle = lambda k: any(0 <= k - b < 30 for b in bm)                       # 30 min after a boot: settling
+        pk = [k for k in sorted(pps) if k >= r0 and pps[k][1] >= 30 and not settle(k)]
+        lat = np.array([(-pps[k][0] / pps[k][1] - PROP_E) * 1000.0 - (FIX_US if k < FIX_T else 0.0) for k in pk])   # us
         bl = [b for b in boots if b >= t0]
-    tl = np.array([dt.datetime.fromtimestamp(k * 60, dt.timezone.utc) for k in pk])
-    fig, ax = plt.subplots(figsize=(12, 5.5))
+    fig, ax = plt.subplots(figsize=(12, 6))
     shade_night(ax, t0, now)
-    ax2 = ax.twinx()
     ev = e[~np.isnan(e)] if len(t) else np.array([])
-    txt = "-"
-    if len(t):                                             # left axis: carrier - GPS
-        ax.plot(t, rolling(e, 60, 40), "-", lw=1.8, color="tab:red", label="carrier - GPS, 60-min mean (left axis)")
-    if len(pk) > 5:                                        # right axis: second misalignment
-        ax2.plot(tl, lat, ".", ms=2, color="tab:blue", alpha=0.25)
-        ax2.plot(tl, rolling(lat, 60, 40), "-", lw=1.8, color="navy", label="second late vs GPS PPS, 60-min mean (right axis)")
-        x = np.array([k / 1440.0 for k in pk]); A = np.polyfit(x, lat, 1)
-        # the misalignment the carrier predicts: integral of -(carrier offset) over time (one OCXO drives both),
-        # offset to the measured mean (only its shape/slope is predicted)
+    txt = "not enough data yet"
+    if len(pk) > 240 and len(ev) > 60:
         em = {int(k): v for k, v in zip(keys, e) if not np.isnan(v)}
-        fill = ev.mean() if len(ev) else 0.0
+        fill = float(np.median(ev))
         mins = np.arange(pk[0], pk[-1] + 1)
-        cum = np.cumsum([-em.get(int(m), fill) * 60e-9 * 1e3 for m in mins])   # ms
-        cum_at = dict(zip(mins, cum))
-        pred = np.array([cum_at[k] for k in pk])
-        pred += np.mean(lat) - np.mean(pred)               # same mean as the measurement: compare the slopes/shape
-        ax2.plot(tl, pred, "--", lw=1.4, color="k", label="second predicted from the carrier (integral of its offset)")
-        txt = (f"carrier {ev.mean():+.3f} ppb ({ev.mean()*0.225:+.3f} mHz) | second now {np.mean(lat[-10:]):.3f} ms late | "
-               f"drift {A[0]:+.3f} ms/day measured, {-ev.mean()*0.0864:+.3f} predicted")
-        lo, hi = np.percentile(lat, [1, 99]); pad = 0.4 * (hi - lo) + 0.05; ax2.set_ylim(lo - pad, hi + pad)
-    if len(ev) > 10:
-        r60 = rolling(e, 60, 40); r60 = r60[~np.isnan(r60)]
-        lo, hi = (r60.min(), r60.max()) if len(r60) else (-1, 0); pad = 0.6 * (hi - lo) + 0.3
-        ax.set_ylim(lo - pad, hi + pad)
+        xc = np.cumsum([-em.get(int(m), fill) * 60e-9 * 1e6 for m in mins])          # us, carrier-integrated
+        xc_at = dict(zip(mins, xc))
+        x0 = np.array(pk); ref = x0 < pk[0] + 180                                     # reference: first 3 h
+        lat0 = lat[ref].mean(); xc0 = np.mean([xc_at[k] for k in x0[ref]])
+        tm = np.array([dt.datetime.fromtimestamp(m * 60, dt.timezone.utc) for m in mins])
+        ax.plot(tm, xc - xc0, "-", lw=2.2, color="tab:red", label="carrier: accumulated time error = -integral of (carrier - GPS)")
+        def blocks(w):
+            out = []
+            for i in range(0, len(pk) - w // 2, w):
+                sel = slice(i, i + w)
+                if len(lat[sel]) < 0.6 * w: continue
+                hm = [lat[j:j + 60].mean() for j in range(i, min(i + w, len(lat)) - 59, 60)]
+                se = np.std(hm, ddof=1) / np.sqrt(len(hm)) if len(hm) > 1 else np.std(lat[sel]) / np.sqrt(len(lat[sel]) / 30)
+                out.append((pk[i] + w / 2, lat[sel].mean() - lat0, se))
+            return out
+        b1 = blocks(60); b3 = blocks(180)
+        ax.plot([dt.datetime.fromtimestamp(m * 60, dt.timezone.utc) for m, _, _ in b1], [v for _, v, _ in b1], "o", ms=3, color="tab:blue", alpha=0.35, label="second: 1-h means")
+        ax.errorbar([dt.datetime.fromtimestamp(m * 60, dt.timezone.utc) for m, _, _ in b3], [v for _, v, _ in b3], yerr=[q for _, _, q in b3],
+                    fmt="s", ms=6, color="navy", capsize=3, label="second: 3-h means +- standard error")
+        # independent slope of the second (no carrier used) and its uncertainty from the hourly means
+        hx = np.array([m for m, _, _ in b1]) / 1440.0; hy = np.array([v for _, v, _ in b1])
+        if len(hx) > 3:
+            A, cov = np.polyfit(hx, hy, 1, cov=True); sA = float(np.sqrt(cov[0, 0]))
+            pred = -fill * 86.4                                                        # us/day from the carrier
+            ax.plot(tm, np.polyval(A, np.array(mins) / 1440.0), ":", color="navy", lw=1.2, label=f"second: straight-line fit {A[0]:+.0f} +- {sA:.0f} us/day")
+            txt = (f"carrier median {fill:+.3f} ppb -> predicts {pred:+.0f} us/day | second measured {A[0]:+.0f} +- {sA:.0f} us/day "
+                   f"({(A[0] - pred) / sA:+.1f} sigma from the prediction) | {len(pk) / 1440:.1f} days of data")
     for b_ in bl: ax.axvline(b_, color="0.5", ls=":", lw=1)
-    ax.set_ylabel("carrier - GPS [ppb]", color="tab:red"); ax2.set_ylabel("e-CzasPL second after the GPS second [ms]", color="navy")
-    ax.grid(alpha=0.3)
-    h1, l1 = ax.get_legend_handles_labels(); h2, l2 = ax2.get_legend_handles_labels()
+    ax.axhline(0, color="k", lw=0.6)
+    ax.set_ylabel("accumulated time error since the start [us]  (> 0: later)"); ax.grid(alpha=0.3)
+    h1, l1 = ax.get_legend_handles_labels()
     if bl: h1 += [plt.Line2D([], [], ls=":", color="0.5")]; l1 += ["NUCLEO reboot / flash"]
-    ax.legend(h1 + h2, l1 + l2, loc="lower left", fontsize=8)
+    ax.legend(h1, l1, loc="lower right", fontsize=8)
     ax.xaxis.set_major_formatter(xfmt); fig.autofmt_xdate()
-    ax.set_title("e-CzasPL 225 kHz against GPS: carrier frequency and second (start of the 16-bit sync, at the transmitter)\n" + txt, fontsize=10, loc="left")
+    ax.set_title("e-CzasPL: does the second drift as the 225 kHz carrier predicts? (GUM: both from one OCXO)\n" + txt, fontsize=10, loc="left")
     site_legend(fig)
     out["ecz"] = png(fig)
 
@@ -432,8 +444,11 @@ a.on{{font-weight:bold}} h2{{margin-top:28px}}</style></head><body>
 <h2>Stability (Allan deviation)</h2><img src="adev.png?r={r}&v={v}">
 <h2>OCXO time error against GPS</h2><img src="phase.png?r={r}&v={v}">
 <h2>OCXO free-running frequency</h2><img src="free.png?r={r}&v={v}">
-<h2>e-CzasPL (225 kHz) against GPS: carrier frequency and second misalignment</h2>
-<p>GUM, 2 Oct 2026: the carrier and the frame start come from one OCXO for now (rubidium planned), so the second drifts by -(carrier offset) x 86400 s per day.</p>
+<h2>e-CzasPL (225 kHz): carrier and second from one OCXO?</h2>
+<p>GUM, 2 Oct 2026: the carrier and the frame start come from one OCXO for now (rubidium planned). If so, the second must drift exactly as the carrier's
+frequency error accumulates: red = the carrier's accumulated time error (from its frequency vs GPS, precise to nanoseconds), blue = the measured lateness
+of the second vs the GPS PPS (noisy: tens of us per hour), both set to 0 at the start. They should run together; the match becomes clear after a few days
+(-0.8 ppb = 69 us/day). The ~32 us that the firmware before 2 Oct 08:04 added to all station timings is removed, and the first 30 min after each NUCLEO boot (settling) are left out.</p>
 <img src="ecz.png?r={r}&v={v}">
 <h2>Decodes vs expected, per hour</h2><img src="decodes.png?r={r}&v={v}">
 <h2>Hourly table (latest first)</h2>{table}
