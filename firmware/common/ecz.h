@@ -29,8 +29,9 @@ void ecz_init(ecz_t *e);
 void ecz_push(ecz_t *e, int16_t ph);        /* phase, 65536 = 360 deg */
 
 /* Frame-time offset added to every frame time; the reported second = the START of the frame's first linear
-   phase ramp (GUM: "transmission starts at the beginning of the second"; the '0' of 1-0-1 starts exactly
-   0.5 s later). The core's template and timing refinement model each bit change as a RAMP_BLOCKS (8 =
+   phase ramp = the start of bit 0 of the 16-bit sync 0x55 0x55 (GUM: "transmission starts at the beginning
+   of the second"; GUM to the author 2 Oct 2026: a receiver loads the time at the beginning of the frame
+   transmission = the start of the 16-bit sync, not the 1-0-1; the '0' of 1-0-1 starts exactly 0.5 s later). The core's template and timing refinement model each bit change as a RAMP_BLOCKS (8 =
    16 ms) ramp starting at the bit edge, but the transmitted ramp is longer: 18.6 ms fitted on the IC-7610
    (1 Oct 2026, 60 frames), 19 ms according to GUM (Sadowski 2025, Metrol. Meas. Syst. 32(4),
    DOI 10.24425/mms.2025.155800). A too short model centres on the real ramp and puts its start late:
