@@ -239,6 +239,32 @@ def render(rng):
     site_legend(fig)
     out["carriers"] = png(fig)
 
+    # 1b) time vs GPS: each station's second at its transmitter against the GPS PPS (GPS PPS lines, per-minute
+    #     means of the per-second values; propagation removed); same layout as the carrier chart
+    with lock:
+        pk2 = [k for k in sorted(pps) if k >= r0]
+        de = {k: -pps[k][0] / pps[k][1] - PROP_E for k in pk2 if pps[k][1] >= 30}
+        dd = {k: -pps[k][2] / pps[k][3] - PROP_D for k in pk2 if pps[k][3] >= 30}
+        bl2 = [b for b in boots if b >= t0]
+    fig, axs = plt.subplots(2, 1, figsize=(12, 6.5), sharex=True)
+    for ax, D, name, col, path in ((axs[0], dd, "DCF77", "tab:blue", PROP_D), (axs[1], de, "e-CzasPL", "tab:red", PROP_E)):
+        shade_night(ax, t0, now)
+        if len(D) > 5:
+            kk = sorted(D); y = np.array([D[k] for k in kk]); tt = np.array([dt.datetime.fromtimestamp(k * 60, dt.timezone.utc) for k in kk])
+            ax.plot(tt, y, ".", ms=2.5, color=col, alpha=0.35, label=f"{name} second - GPS second at the transmitter, 1-min")
+            ax.plot(tt, rolling(y, 60, 40), "-", lw=1.6, color=col, label="60-min mean")
+            A = np.polyfit(np.array(kk) / 1440.0, y, 1)
+            lo, hi = np.percentile(y, [1, 99]); pad = 0.3 * (hi - lo) + 0.03; ax.set_ylim(lo - pad, hi + pad)
+            ax.set_title(f"{name} second vs GPS at the transmitter (path {path:.3f} ms removed): now {np.mean(y[-10:]):+.3f} ms, "
+                         f"mean {y.mean():+.3f} ms, sd {y.std():.3f} ms, trend {A[0]:+.3f} ms/day", fontsize=10, loc="left")
+        else:
+            ax.set_title(f"{name} second vs GPS: no data", fontsize=10, loc="left")
+        for b_ in bl2: ax.axvline(b_, color="0.5", ls=":", lw=1)
+        ax.set_ylabel("ms"); ax.grid(alpha=0.3); ax.legend(loc="lower left", fontsize=8)
+    axs[1].xaxis.set_major_formatter(xfmt); fig.autofmt_xdate()
+    site_legend(fig)
+    out["time"] = png(fig)
+
     # 2) Allan deviation
     fig, ax = plt.subplots(figsize=(12, 5))
     taus = sorted({int(round(x)) for x in np.logspace(0, 4, 30)})
@@ -402,6 +428,7 @@ a.on{{font-weight:bold}} h2{{margin-top:28px}}</style></head><body>
 <p>range: {links} &middot; updated {upd} UTC (charts redrawn at most every {redraw} s, page reloads every 5 min) &middot; source: rx.log, GPS lock since {gps_from} UTC; strips at the top of each chart = night (sun below the horizon) at Wroclaw (receiver) / Solec Kujawski (e-CzasPL) / Mainflingen (DCF77)</p>
 {summary_cur}
 <h2>Carrier frequency against GPS</h2><img src="carriers.png?r={r}&v={v}">
+<h2>Time vs GPS</h2><p>Each station's second at its transmitter against the GPS PPS (DCF77: phase code; e-CzasPL: start of the 16-bit sync); dotted lines = NUCLEO reboots / flashes (DCF77 had a boot-dependent bias before 2 Oct 08:04).</p><img src="time.png?r={r}&v={v}">
 <h2>Stability (Allan deviation)</h2><img src="adev.png?r={r}&v={v}">
 <h2>OCXO time error against GPS</h2><img src="phase.png?r={r}&v={v}">
 <h2>OCXO free-running frequency</h2><img src="free.png?r={r}&v={v}">
