@@ -159,12 +159,52 @@ def png(fig):
     b = io.BytesIO(); fig.savefig(b, format="png", dpi=100, bbox_inches="tight"); plt.close(fig); return b.getvalue()
 
 
-def shade_night(ax, t0, t1):
-    d = t0.replace(hour=0, minute=0, second=0, microsecond=0) - dt.timedelta(days=1)
-    while d < t1:
-        ax.axvspan(d + dt.timedelta(hours=18), d + dt.timedelta(hours=30), color="0.92", zorder=0, lw=0)
-        d += dt.timedelta(days=1)
+SITES = (("Wroclaw (receiver)", 51.11, 17.04, "0.35"),             # grey background = night at the receiver
+         ("Solec Kujawski (e-CzasPL)", 53.08, 18.23, "tab:red"),     # strips at the top of every time chart
+         ("Mainflingen (DCF77)", 50.02, 9.01, "tab:blue"))
+
+
+def sun_elev(lat, lon, tu):
+    """solar elevation [deg] at unix times tu (NOAA-style low-precision formulas, ~0.1 deg)"""
+    d = np.asarray(tu, float) / 86400.0 - 10957.5                    # days since J2000.0
+    g = np.radians(357.529 + 0.98560028 * d); q = 280.459 + 0.98564736 * d
+    L = np.radians(q + 1.915 * np.sin(g) + 0.020 * np.sin(2 * g)); e = np.radians(23.439 - 3.6e-7 * d)
+    ra = np.arctan2(np.cos(e) * np.sin(L), np.cos(L)); dec = np.arcsin(np.sin(e) * np.sin(L))
+    H = np.radians((18.697374558 + 24.06570982441908 * d) * 15.0 + lon) - ra
+    la = np.radians(lat)
+    return np.degrees(np.arcsin(np.sin(la) * np.sin(dec) + np.cos(la) * np.cos(dec) * np.cos(H)))
+
+
+def night_spans(lat, lon, t0, t1):
+    """[(start, end)] where the sun is below the horizon (-0.833 deg: sunset/sunrise incl. refraction)"""
+    tu = np.arange(t0.timestamp() - 600, t1.timestamp() + 600, 120.0)
+    dark = sun_elev(lat, lon, tu) < -0.833
+    out, i = [], 0
+    while i < len(tu):
+        if dark[i]:
+            j = i
+            while j + 1 < len(tu) and dark[j + 1]: j += 1
+            out.append((dt.datetime.fromtimestamp(tu[i], dt.timezone.utc), dt.datetime.fromtimestamp(tu[j], dt.timezone.utc)))
+            i = j + 1
+        else: i += 1
+    return out
+
+
+def shade_night(ax, t0, t1, legend=True):
+    """grey = night at Wroclaw; thin strips at the top = night at Wroclaw, Solec Kujawski, Mainflingen"""
+    for k, (name, la, lo, col) in enumerate(SITES):
+        spans = night_spans(la, lo, t0, t1)
+        if k == 0:
+            for a, b in spans: ax.axvspan(a, b, color="0.92", zorder=0, lw=0)
+        y1 = 1.0 - 0.025 * k; y0 = y1 - 0.022
+        for a, b in spans: ax.axvspan(a, b, ymin=y0, ymax=y1, color=col, alpha=0.55, zorder=1, lw=0)
     ax.set_xlim(t0, t1)
+
+
+def site_legend(fig):
+    from matplotlib.patches import Patch
+    h = [Patch(color=c, alpha=0.55, label=f"night {n}") for n, _, _, c in SITES]
+    fig.legend(handles=h, loc="upper right", ncol=3, fontsize=8, frameon=False, bbox_to_anchor=(0.99, 1.0))
 
 
 def stat_line(y):
@@ -198,6 +238,7 @@ def render(rng):
         ax.set_ylabel("ppb"); ax.grid(alpha=0.3); ax.legend(loc="upper left", fontsize=8)
         ax.set_title(f"{name} carrier frequency - GPS: {stat_line(y)}", fontsize=10, loc="left")
     axs[1].xaxis.set_major_formatter(xfmt); fig.autofmt_xdate()
+    site_legend(fig)
     out["carriers"] = png(fig)
 
     # 2) Allan deviation
@@ -227,6 +268,7 @@ def render(rng):
     ax.set_ylabel("ns"); ax.grid(alpha=0.3); ax.legend(loc="upper left", fontsize=8)
     ax.xaxis.set_major_formatter(xfmt); fig.autofmt_xdate()
     ax.set_title("OCXO time error against GPS", fontsize=10, loc="left")
+    site_legend(fig)
     out["phase"] = png(fig)
 
     # 3b) the OCXO's own frequency (steering removed): what the loop has to correct
@@ -238,6 +280,7 @@ def render(rng):
     ax.set_ylabel("ppb"); ax.grid(alpha=0.3); ax.legend(loc="upper left", fontsize=8)
     ax.xaxis.set_major_formatter(xfmt); fig.autofmt_xdate()
     ax.set_title("OCXO free-running frequency (GPS-measured frequency + EFC slope x code offset; > 0: slow)", fontsize=10, loc="left")
+    site_legend(fig)
     out["free"] = png(fig)
 
     # 3c) e-CzasPL (225 kHz) against GPS: carrier frequency and second misalignment (GUM 2 Oct 2026: both come
@@ -274,6 +317,7 @@ def render(rng):
     ax.set_ylabel("ms late"); ax.grid(alpha=0.3); ax.legend(loc="upper left", fontsize=8)
     ax.xaxis.set_major_formatter(xfmt); fig.autofmt_xdate()
     ax.set_title("e-CzasPL second (start of the 16-bit sync) after the GPS second, at the transmitter (path 0.765 ms removed)\n" + txt, fontsize=10, loc="left")
+    site_legend(fig)
     out["ecz"] = png(fig)
 
     # 4) hourly decodes vs expected
@@ -348,7 +392,7 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport"
 table{{border-collapse:collapse;font-size:13px}} td,th{{border:1px solid #ccc;padding:2px 6px;text-align:right}} th{{background:#eee}}
 a.on{{font-weight:bold}} h2{{margin-top:28px}}</style></head><body>
 <h1>NUCLEO receiver: carriers against GPS, decodes per hour</h1>
-<p>range: {links} &middot; updated {upd} UTC (charts redrawn at most every {redraw} s, page reloads every 5 min) &middot; source: rx.log, GPS lock since {gps_from} UTC; grey = night 18-06 UTC</p>
+<p>range: {links} &middot; updated {upd} UTC (charts redrawn at most every {redraw} s, page reloads every 5 min) &middot; source: rx.log, GPS lock since {gps_from} UTC; grey background = night (sun below the horizon) at the receiver in Wroclaw, strips at the top of each chart = night at Wroclaw / Solec Kujawski (e-CzasPL) / Mainflingen (DCF77)</p>
 {summary_cur}
 <h2>Carrier frequency against GPS</h2><img src="carriers.png?r={r}&v={v}">
 <h2>Stability (Allan deviation)</h2><img src="adev.png?r={r}&v={v}">
