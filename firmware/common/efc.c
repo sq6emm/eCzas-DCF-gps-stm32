@@ -96,7 +96,7 @@ void efc_init(efc_t *f, double code, double slope)
     f->r10sum = f->r10prev = f->v10 = 0; f->r10n = f->r10gap = 0; f->h10 = 0;
     f->gx_off = f->gx = 0; f->vg = 0; f->pyg = 0;
     f->gsus = 0; f->gsus_why = 0; f->n10g = f->nd10 = f->ne10 = 0; f->dg10 = f->eg10 = f->bdg = f->beg = 0; f->nbg = 0;
-    f->gxr_prev = f->gyr_prev = 0; f->gxr_ok = f->gyr_ok = 0; f->c_min = f->c; f->gsus_age = 0;
+    f->gxr_prev = f->gyr_prev = 0; f->gxr_ok = f->gyr_ok = 0; f->c_min = f->c; f->gsus_age = 0; f->gjump_ext = 0;
     if (slope != 0) { f->slope = slope; f->state = EFC_LOCK; f->skip = 0; }
 }
 
@@ -171,6 +171,12 @@ int efc_minute3(efc_t *f, int vg, double xg, int vd, double yd, int ve, double y
     {
         int have_prev = vg && f->gxr_ok;
         double ygr = have_prev ? (xg - f->gxr_prev) / T : 0;          /* > 0: OCXO slow against the GPS */
+        if (f->gjump_ext && f->state == EFC_LOCK) {                    /* a jump seen pulse by pulse (main.c) */
+            if (f->gsus < EFC_GPS_HOLD_J) f->gsus = EFC_GPS_HOLD_J;
+            f->gsus_why = 1; f->n10g = f->nd10 = f->ne10 = 0; f->dg10 = f->eg10 = 0;
+            have_prev = 0;
+        }
+        f->gjump_ext = 0;
         if (have_prev && f->gyr_ok && f->state == EFC_LOCK) {
             double dy_cmd = -f->slope * (f->c - f->c_min);             /* code up -> OCXO faster -> y down */
             if (fabs((ygr - (f->gyr_prev + dy_cmd)) * T) > EFC_GPS_JUMP) {

@@ -56,6 +56,7 @@ typedef struct {
     int    n10g, nd10, ne10, nbg;
     double gxr_prev, gyr_prev, c_min;   /* raw GPS phase / frequency of the last minute, code then */
     int    gxr_ok, gyr_ok;
+    int    gjump_ext;             /* set by the caller before efc_minute3: a GPS phase jump seen pulse by pulse */
 } efc_t;
 
 /* slope 0: calibrate first; otherwise the known slope [fraction per code] -> straight to LOCK */

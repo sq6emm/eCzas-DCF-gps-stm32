@@ -76,6 +76,8 @@ static tk_t tk;
 static frame_info_t last_fi;
 static int have_last_fi;
 static uint32_t n_heard, n_decoded, n_conf, n_rej;
+#define ECZ_N_MIN_S 789004800UL       /* 2025-01-01 in seconds since 2000-01-01 (e-CzasPL time = 3 N) */
+#define ECZ_N_MAX_S 1451692800UL      /* 2046-01-01 */
 
 /* ---------------------------------------------------------------- output */
 /* interrupt-driven TX ring, so printing never stalls the signal path */
@@ -319,6 +321,8 @@ static double pps_tt; static int pps_new;   /* the last pulse in true time (capt
 /* GPS PPS phase against the OCXO second, unwrapped [s] (> 0: the OCXO second comes after the GPS second),
    summed over the current minute for the OCXO loop */
 static double gps_ph_prev, gps_xun, gps_xsum; static int gps_have, gps_n;
+static double gps_st_avg; static int gps_st_n, gps_jump;   /* per-second phase step: running mean, count, jump seen */
+#define GPS_SEC_JUMP 300e-9          /* one pulse's phase step this far from the recent ones = a GPS phase jump */
 #endif
 static int lse_ok;
 #ifdef OCXO_REF
@@ -786,10 +790,23 @@ static void handle_candidate(void)
         ez.cand_ready = 0;
         return;
     }
+    /* plausibility before the clock sees it: a weak non-time message "repaired" by the Reed-Solomon
+       decoder can pass the CRC as a wrong time (e.g. 2069-04-15 05:05:51, 91 times 28 Sep - 2 Oct).
+       rx.log 28 Sep - 2 Oct: 166 such decodes (all rejected by the clock later), 29345 genuine; a date
+       outside 2025..2045 or >= 2 RS fixes at snr <= -3 dB catches 154 of the 166 and 9 genuine */
+    if (3UL * fi.n3 < ECZ_N_MIN_S || 3UL * fi.n3 >= ECZ_N_MAX_S || (fi.rs_fixed >= 2 && fi.snr_db <= -3)) {
+        date_str(d1, 3UL * fi.n3, fi.tz);
+        snprintf(m, sizeof m, "#%lu corr %d%% snr %d dB, fixed %u%s: %s - implausible, ignored", (unsigned long)n_heard,
+                 c->corr_q10 * 100 / 1024, fi.snr_db, fi.rs_fixed, fi.chase_flips ? " + soft retry" : "", d1);
+        put_line("FRAME", m);
+        n_rej++;
+        ez.cand_ready = 0;
+        return;
+    }
     tick += (int64_t)fi.timing_q15 * TICKS_PER_BLOCK / 32768;
     coh_level_hint(&trk_e, -fi.lvl_sep / 65536.0f);     /* measured '0' level for the carrier loop */
-    int32_t off_ms = 0;
-    if (tk.synced) off_ms = (int32_t)((tick - tk_second_tick(&tk, 3UL * fi.n3)) / (FCY_HZ / 1000));
+    int64_t off_ms = 0;                   /* 64 bit: a wrong date is decades off (was printed modulo 2^32 ms) */
+    if (tk.synced) off_ms = (tick - tk_second_tick(&tk, 3UL * fi.n3)) / (FCY_HZ / 1000);
     tk_result_t r = tk_frame(&tk, tick, &fi);
     n_decoded++;
     led1_until = n2k + LED_BLINK;
@@ -800,9 +817,12 @@ static void handle_candidate(void)
     switch (r) {
     case TK_ACCEPTED: snprintf(m, sizeof m, "frame agrees with clock, error %s ms", f1(b1, tk.last_err_us / 1000.0, 1)); break;
     case TK_SYNCED:   snprintf(m, sizeof m, "SYNCHRONISED - two frames agree"); break;
-    case TK_STEPPED:  snprintf(m, sizeof m, "STEPPED by %ld ms", (long)off_ms); break;
+    case TK_STEPPED:  snprintf(m, sizeof m, "STEPPED by %ld ms", (long)(off_ms > 2000000000LL ? 2000000000LL : off_ms < -2000000000LL ? -2000000000LL : off_ms)); break;
     case TK_CANDIDATE: snprintf(m, sizeof m, "not synchronised yet - waiting for a second frame"); break;
-    default: n_rej++; snprintf(m, sizeof m, "REJECTED - differs from clock by %ld ms", (long)off_ms); break;
+    default: n_rej++;
+        if (off_ms > -2000000000LL && off_ms < 2000000000LL) snprintf(m, sizeof m, "REJECTED - differs from clock by %ld ms", (long)off_ms);
+        else snprintf(m, sizeof m, "REJECTED - differs from clock by %ld days", (long)(off_ms / 86400000LL));
+        break;
     }
     put_line("CLOCK", m);
     if (r == TK_ACCEPTED || r == TK_SYNCED) { hs.all_ok++; hs_mark(fi.n3, 3); }
@@ -937,6 +957,14 @@ int main(void)
             pl_t0 = true_time((int64_t)(200.0 * ((double)(rd - BLOCK) - dec_pos)) + pl_c); pl_n0 = n2k;
             F_true = F_CARRIER;                /* fixed; the carrier trackers follow the rest */
             pl_ok = 1;
+            /* this first block is summed below with the true sample rate too: before, cur_tps_ratio was
+               still the nominal 1.0 here (the ADC runs ~6500 ppm fast), so its 10 outputs took 500 instead
+               of ~503 input samples each and every later output - DCF77, e-CzasPL, TDF via e-CzasPL - sat
+               ~32 us late against pl_t0 for the whole boot (review 3, 2 Oct 2026) */
+            {
+                double dt0 = (pl_t - true_time(200 * (int64_t)(rd - BLOCK) + pl_c)) * REF_CAP_S;
+                if (dt0 > 0.004 && dt0 < 0.006) cur_tps_ratio = BLOCK / (dt0 * FS_NOM_HZ);
+            }
         }
         process_block(b, mean, mean2);
         if (!spec_left && n2k >= next_spec) { spec_clear(&spec); spec_left = SPEC_BLOCKS; spec_ctr = 0; next_spec += 1200000; }
@@ -990,6 +1018,12 @@ int main(void)
                         if (gps_have) {
                             double st = -(ph - gps_ph_prev);
                             st -= floor(st + 0.5);                 /* to -0.5 .. 0.5 s */
+                            /* phase jump check per PULSE (review 3: the minute-mean check in efc.c missed a 550 ns
+                               step landing mid-minute - the minute means split it). Normal steps differ from their
+                               running mean by the pulse jitter (~20 ns rms, NEO-7P); a step > GPS_SEC_JUMP, or a
+                               glitch > 10 us after a settled run, marks this minute -> efc suspends the GPS */
+                            if (gps_st_n >= 5 && fabs(st - gps_st_avg) > GPS_SEC_JUMP) gps_jump = 1;
+                            else if (fabs(st) < 1e-5) { gps_st_avg += (st - gps_st_avg) * (gps_st_n < 10 ? 1.0 / (gps_st_n + 1) : 0.1); gps_st_n++; }
                             if (fabs(st) < 1e-5) { gps_xun += st; gps_xsum += gps_xun; gps_n++; gps_ph_prev = ph; }
                             else gps_have = 0;                     /* start again at the next pulse */
                         } else { gps_have = 1; gps_ph_prev = ph; }
@@ -1055,6 +1089,7 @@ int main(void)
                 int ng = gps_n, vg = EFC_USE_GPS && ng >= 50;
                 double xg = ng ? gps_xsum / ng : 0;
                 gps_xsum = 0; gps_n = 0;
+                efc.gjump_ext = gps_jump; gps_jump = 0;
                 double yd = rd2.freq_hz / F_DCF, ye = re.freq_hz / F_CARRIER;
                 int src = efc_minute3(&efc, vg, xg, vd, yd, ve, ye, 60.0);
                 static const char *SRC[] = { "none", "DCF77", "e-CzasPL", "DCF77+e-CzasPL", "GPS" };

@@ -6,6 +6,9 @@
 
 #define WIN (DCF_SPS + 2 * DCF_LAGW)
 #define QRING 4096                          /* > WIN, power of 2 */
+#ifndef DCF_PM_BIAS_US
+#define DCF_PM_BIAS_US (-6.3f)              /* mean bias of the sub-sample peak estimate (simulated), removed */
+#endif
 
 static float W[DCF_SPS];                    /* phase-code template (mean 0, unit energy) */
 static float T[DCF_SPS];                    /* second-mark template (mean 0) */
@@ -238,13 +241,27 @@ static void pm_eval(dcf_t *d)
         sg = robust_sigma(cc, 2 * DCF_LAGW + 1, kb - 4 < 0 ? 0 : kb - 4, kb + 4 > 2 * DCF_LAGW ? 2 * DCF_LAGW : kb + 4, &med);
         d->pm_sigma = (fabsf(cc[kb]) - fabsf(med)) / sg;
         {
+            /* sub-sample peak. The correlation of the 0.5 ms sums with the chip template is a triangle
+               (+-1 chip = +-3.1 samples) convolved with the 0.5 ms box: parabolic near the top (|x| < 0.5
+               sample), linear outside. A parabola through the three top points was biased by -42..+30 us
+               depending on where the second falls in the sample grid (review 3, 2 Oct 2026; fixed per boot ->
+               30-50 us steps at reboots). For that shape, with D = y3 - y1 and M = y2 - (y1 + y3) / 2:
+               D / M = 2p / (0.75 - p^2) -> p = (sqrt(4 + 3 r^2) - 2) / (2 r), r = D / M. Simulated
+               (tools/dcf_peak_sim.py: the PTB sequence, 0.5 ms sums): -7.3..-5.2 us instead of -42..+30 us; the mean
+               -6.3 us is removed by DCF_PM_BIAS_US */
             float fr = 0;
             if (kb > 0 && kb < 2 * DCF_LAGW) {
-                float y1 = fabsf(cc[kb - 1]), y2 = fabsf(cc[kb]), y3 = fabsf(cc[kb + 1]), den = y1 - 2 * y2 + y3;
-                if (den != 0) fr = 0.5f * (y1 - y3) / den;
+                float y1 = fabsf(cc[kb - 1]), y2 = fabsf(cc[kb]), y3 = fabsf(cc[kb + 1]);
+                float D = y3 - y1, M = y2 - 0.5f * (y1 + y3);
+                if (M > 0 && fabsf(D) > 1e-9f * M) {
+                    float r = D / M;
+                    fr = (sqrtf(4.0f + 3.0f * r * r) - 2.0f) / (2.0f * r);
+                    if (fr > 0.5f) fr = 0.5f;
+                    if (fr < -0.5f) fr = -0.5f;
+                }
             }
             int off = ((d->pm_ref - d->mark + DCF_SPS + DCF_SPS / 2) % DCF_SPS) - DCF_SPS / 2;   /* anchor - mark, samples */
-            d->pm_lag_ms = (kb - DCF_LAGW + fr + off) * 1000.0f / DCF_SPS;
+            d->pm_lag_ms = (kb - DCF_LAGW + fr + off) * 1000.0f / DCF_SPS - DCF_PM_BIAS_US / 1000.0f;
         }
     }
 }

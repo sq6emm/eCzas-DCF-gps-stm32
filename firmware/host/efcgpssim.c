@@ -1,8 +1,9 @@
 /* Closed-loop simulation of common/efc.c with the GPS PPS phase lock (efc_minute3), second by second.
- *   efcgpssim [mode] [days] [seed]
+ *   efcgpssim [mode] [days] [seed] [step offset s]
  *     mode 0: GPS all the time; 1: GPS with a 6 h outage (DCF77 / e-CzasPL take over) in the middle;
  *          2: DCF77 only (the loop before the GPS lock, for comparison); 3: cold start 20 ppb off, GPS;
- *          4: spoofed GPS phase STEP of 500 ns at mid-run; 5: spoofed GPS FREQUENCY +20 ppb from mid-run
+ *          4: spoofed GPS phase STEP of 550 ns at mid-run (+ offset s into the minute: review 3 found a
+ *          mid-minute step undetected by the minute-mean check); 5: spoofed GPS FREQUENCY +20 ppb from mid-run
  * OCXO: y_free = offset + random-walk FM + ageing + daily temperature swing; y = y_free - slope (code - c0)
  * (> 0: slow, as in efc.c); the DAC is dithered by efc_tick as on the board. GPS PPS: jitter 20 ns rms on the
  * pulse phase (NEO-7P, 1 Oct 2026); the firmware's unwrap / 10 us glitch filter / minute mean are copied.
@@ -25,11 +26,13 @@ int main(int argc, char **argv)
 {
     int mode = argc > 1 ? atoi(argv[1]) : 0; double days = argc > 2 ? atof(argv[2]) : 2;
     srand(argc > 3 ? atoi(argv[3]) : 1);
+    long toff = argc > 4 ? atol(argv[4]) : 0;
     const double slope = 0.816e-9, c0 = 2252.0;
     long N = (long)(days * 86400);
     efc_t f; efc_init(&f, c0, slope);
     double y0 = (mode == 3 ? 20e-9 : 1.5e-9), rw = 0, tocxo = 0.37, xtrue = 0;   /* OCXO time vs GPS [s] */
     double ph_prev = 0, xun = 0, xsum = 0; int have = 0, n = 0;
+    double st_avg = 0; int st_n = 0, jump = 0;                         /* main.c per-pulse jump check */
     int code = (int)c0;
     double *ym = malloc(sizeof(double) * (N / 60 + 2)); long nm = 0; double ysum_min = 0;
     double sx2 = 0, xmax = 0; long nx = 0; double skyp = 0; long nsus = 0, nj = 0, nf = 0, ngps = 0;
@@ -43,10 +46,12 @@ int main(int argc, char **argv)
         ysum_min += y;
         int gps_on = mode != 2 && !(mode == 1 && t > N / 2 - 3 * 3600 && t < N / 2 + 3 * 3600);
         if (gps_on) {                                                  /* the firmware's PPS processing */
-            double spoof = (mode == 4 && t > N / 2) ? 500e-9 : (mode == 5 && t > N / 2) ? -20e-9 * (t - N / 2) : 0;
+            double spoof = (mode == 4 && t > N / 2 + toff) ? 550e-9 : (mode == 5 && t > N / 2) ? -20e-9 * (t - N / 2) : 0;
             double ph = fmod(tocxo + spoof + 20e-9 * gauss(), 1.0); if (ph < 0) ph += 1;
             if (have) {
                 double st = -(ph - ph_prev); st -= floor(st + 0.5);
+                if (st_n >= 5 && fabs(st - st_avg) > 300e-9) jump = 1;
+                else if (fabs(st) < 1e-5) { st_avg += (st - st_avg) * (st_n < 10 ? 1.0 / (st_n + 1) : 0.1); st_n++; }
                 if (fabs(st) < 1e-5) { xun += st; xsum += xun; n++; ph_prev = ph; } else have = 0;
             } else { have = 1; ph_prev = ph; }
         } else have = 0;
@@ -57,6 +62,7 @@ int main(int argc, char **argv)
             double yd = ymin + (night ? 3e-9 * gauss() + 4e-9 * sin(skyp) * 0.5 : 1.3e-9 * gauss());
             double ye = ymin - 0.85e-9 + 0.4e-9 * gauss();
             int vg = n >= 50; double xg = n ? xsum / n : 0; xsum = 0; n = 0;
+            f.gjump_ext = jump; jump = 0;
             int src = efc_minute3(&f, vg, xg, 1, yd, 1, ye, 60.0);
             if (f.gsus > 0) { nsus++; if (f.gsus_why == 1) nj++; else nf++; }
             if (src == EFC_SRC_GPS) ngps++;
@@ -68,7 +74,7 @@ int main(int argc, char **argv)
         }
     }
     printf("mode %d (%s), %.1f days, tau_gps %.0f s: time error vs GPS rms %.1f ns max %.1f ns | OCXO ADEV",
-           mode, mode == 0 ? "GPS" : mode == 1 ? "GPS, 6 h outage" : mode == 2 ? "DCF77 only" : mode == 3 ? "GPS, cold start 20 ppb" : mode == 4 ? "GPS, spoofed 500 ns step" : "GPS, spoofed +20 ppb",
+           mode, mode == 0 ? "GPS" : mode == 1 ? "GPS, 6 h outage" : mode == 2 ? "DCF77 only" : mode == 3 ? "GPS, cold start 20 ppb" : mode == 4 ? "GPS, spoofed 550 ns step" : "GPS, spoofed +20 ppb",
            days, f.tau, sqrt(sx2 / nx) * 1e9, xmax * 1e9);
     int taus[] = { 1, 10, 60, 180, 360 };
     for (int k = 0; k < 5; k++) {
