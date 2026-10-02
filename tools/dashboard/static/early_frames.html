@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>e-CzasPL Early Time Frames (PL/EN)</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column of a technical observation report; data blocks and the event table scroll inside their own boxes */
+:root {
+  --bg: #f6f7f9; --paper: #ffffff; --fg: #17202b; --muted: #5a6573; --rule: #dde2e8;
+  --accent: #1b5fa8; --accent-soft: #e4eef9; --ok: #1d7a46; --ok-soft: #e3f3ea; --warn: #9a6400; --warn-soft: #fbf0db; --un: #6b7280; --un-soft: #eef0f3;
+  --sans: "IBM Plex Sans", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f141a; --paper: #161d25; --fg: #e3e8ee; --muted: #9aa6b4; --rule: #2a3440;
+  --accent: #6ea8e8; --accent-soft: #1b2b3d; --ok: #6cc595; --ok-soft: #173326; --warn: #e2b05c; --warn-soft: #3a2d14; --un: #a3abb6; --un-soft: #232b35; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0f141a; --paper: #161d25; --fg: #e3e8ee; --muted: #9aa6b4; --rule: #2a3440;
+  --accent: #6ea8e8; --accent-soft: #1b2b3d; --ok: #6cc595; --ok-soft: #173326; --warn: #e2b05c; --warn-soft: #3a2d14; --un: #a3abb6; --un-soft: #232b35; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font: 15px/1.6 var(--sans); }
+.wrap { max-width: 980px; margin: 0 auto; padding-inline: 16px; padding-block: 28px 56px; }
+header { display: grid; gap: 6px; padding-block: 8px 20px; border-bottom: 1px solid var(--rule); }
+.eyebrow { font: 500 12px/1.4 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--accent); }
+h1 { font-size: 30px; line-height: 1.2; margin: 0; text-wrap: balance; font-weight: 700; }
+.meta { color: var(--muted); font-size: 14px; }
+h2 { font-size: 19px; margin: 34px 0 10px; text-wrap: balance; }
+p, li { max-width: 72ch; }
+ul { padding-left: 20px; margin: 8px 0; display: grid; gap: 6px; }
+.lead { font-size: 16.5px; }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin: 18px 0 6px; }
+.fact { background: var(--paper); border: 1px solid var(--rule); border-radius: 6px; padding: 12px 14px; display: grid; gap: 2px; }
+.fact b { font: 600 22px/1.2 var(--mono); font-variant-numeric: tabular-nums; }
+.fact span { color: var(--muted); font-size: 13px; }
+.timeline { background: var(--paper); border: 1px solid var(--rule); border-radius: 6px; padding: 14px; overflow-x: auto; }
+.timeline svg { display: block; min-width: 620px; width: 100%; height: auto; }
+.box { background: var(--paper); border: 1px solid var(--rule); border-radius: 6px; padding: 14px 16px; }
+.ob { display: grid; grid-template-columns: 92px 1fr 32px; align-items: center; gap: 4px 10px; font: 13px/1.3 var(--mono); font-variant-numeric: tabular-nums; }
+.ob + .ob { margin-top: 6px; }
+.ob .bar { height: 14px; background: var(--accent); border-radius: 2px; display: block; min-width: 2px; }
+.ob em { font-style: normal; text-align: right; }
+.ob small { grid-column: 2 / 4; color: var(--muted); font-size: 11.5px; }
+.hours { display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); gap: 3px; height: 120px; align-items: end; padding-bottom: 18px; position: relative; }
+.hb { height: 100%; display: flex; flex-direction: column; justify-content: flex-end; position: relative; }
+.hb span { background: var(--accent); border-radius: 2px 2px 0 0; display: block; min-height: 1px; }
+.hb i { position: absolute; bottom: -18px; left: 0; right: 0; text-align: center; font: 10px var(--mono); color: var(--muted); font-style: normal; }
+.cap { color: var(--muted); font-size: 13px; margin-top: 8px; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+.grid2 > * { min-width: 0; }
+table { border-collapse: collapse; width: 100%; font: 12.5px/1.45 var(--mono); font-variant-numeric: tabular-nums; }
+.tablebox { overflow-x: auto; background: var(--paper); border: 1px solid var(--rule); border-radius: 6px; }
+th, td { text-align: left; padding: 5px 10px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+th { font: 600 12px var(--sans); color: var(--muted); position: sticky; top: 0; background: var(--paper); }
+td:nth-child(1), td:nth-child(4), td:nth-child(5) { text-align: right; }
+.pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font: 500 11.5px var(--sans); }
+.pill.ok { background: var(--ok-soft); color: var(--ok); }
+.pill.pr { background: var(--warn-soft); color: var(--warn); }
+.pill.un { background: var(--un-soft); color: var(--un); }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 13px; color: var(--muted); margin: 8px 0; }
+code { font-family: var(--mono); font-size: .92em; }
+footer { margin-top: 36px; padding-top: 14px; border-top: 1px solid var(--rule); color: var(--muted); font-size: 13px; }
+</style>
+
+<style>
+.bi { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 28px; }
+.bi > div { min-width: 0; }
+.bi > div > :first-child { margin-top: 0; }
+.lang { font: 600 10.5px/1 var(--mono); letter-spacing: .08em; color: var(--accent); background: var(--accent-soft); border-radius: 3px; padding: 2px 5px; display: inline-block; margin-bottom: 6px; }
+.bi p, .bi li { max-width: none; }
+h2 .sl { color: var(--muted); font-weight: 500; }
+@media (max-width: 820px) { .bi { grid-template-columns: 1fr; } }
+</style>
+
+<style>html{color-scheme:light}body{margin:0}</style>
+</head>
+<body>
+<div class="wrap" style="padding-block:12px 0"><a href="./" style="color:var(--accent);font:500 13px var(--sans)">← NUCLEO receiver dashboard</a></div>
+<div class="wrap">
+<header>
+  <div class="eyebrow">e-CzasPL · 225 kHz · raport z obserwacji / observation report · 2.10.2026</div>
+  <h1>Ramki czasu nadawane ok. 2,4 s za wcześnie</h1>
+  <div style="font-size:20px;font-weight:600;color:var(--muted);text-wrap:balance">Time frames transmitted about 2.4 s early</div>
+  <div class="meta">Obserwacje / observations 25.09–02.10.2026 · odbiorniki / receivers: Legnica, Wrocław (PL), Řevnice (CZ) · opracował / prepared by: Dawid, SQ6EMM</div>
+</header>
+
+<h2>Podsumowanie <span class="sl">/ Summary</span></h2>
+<div class="bi">
+<div><span class="lang">PL</span>
+<p class="lead">W 97 zaobserwowanych przypadkach poprawna ramka czasu e-CzasPL należąca do slotu <b>S+3</b> została nadana w poprzedzającym slocie <b>S</b>, z początkiem <b>0,50–0,60 s</b> po początku slotu S, czyli 2,40–2,50 s za wcześnie. Slot S+3 pozostawał wtedy pusty. 88 przypadków potwierdzono bezpośrednio w surowych nagraniach radiowych niezależnie napisanym dekoderem.</p>
+<ul>
+  <li>Wczesna ramka jest kompletną, poprawną ramką czasu: CRC się zgadza, a pole czasu N koduje czas slotu S+3.</li>
+  <li>Jej początek wypada zawsze na pełnym bicie: odchyłka przyjmuje tylko wartości −2400, −2420, −2440, −2460, −2480 i raz −2500 ms (20 ms = jeden bit).</li>
+  <li>Slot S nie zawiera nic innego, a slot S+3, do którego ramka należy, pozostaje pusty.</li>
+  <li>Dotyczy ok. 1 na 400 ramek czasu (ok. 16 dziennie, stale przez cały tydzień), losowo w czasie, bez zależności od pory doby, położenia w minucie ani od poprzedniej transmisji.</li>
+  <li>Odbiorniki oddalone o 239 km (Wrocław i Řevnice) widzą to samo zdarzenie w tej samej chwili (z dokładnością 0,9 ms), więc jego źródłem jest nadajnik.</li>
+</ul></div>
+<div><span class="lang">EN</span>
+<p class="lead">In 97 observed cases, a correct e-CzasPL time frame belonging to slot <b>S+3</b> was transmitted inside the preceding slot <b>S</b>, starting <b>0.50–0.60 s</b> after the start of slot S, that is 2.40–2.50 s early. Slot S+3 then carried nothing. 88 of the cases are confirmed directly in raw radio recordings with an independently written decoder.</p>
+<ul>
+  <li>The early frame is a complete, valid time frame: correct CRC, and its time field N encodes the time of slot S+3.</li>
+  <li>Its start is always on a whole bit: the offset takes only the values −2400, −2420, −2440, −2460, −2480 and once −2500 ms (20 ms = one bit).</li>
+  <li>Slot S carries nothing else, and slot S+3, where the frame belongs, stays empty.</li>
+  <li>It happens to about 1 in 400 time frames (about 16 per day, constant over the week), randomly in time, with no dependence on time of day, position in the minute or the preceding transmission.</li>
+  <li>Receivers 239 km apart (Wrocław and Řevnice) see the same event at the same instant (within 0.9 ms), so it originates at the transmitter.</li>
+</ul></div>
+</div>
+
+<div class="facts">
+  <div class="fact"><b>97</b><span>zdarzeń / events (25.09–02.10)</span></div>
+  <div class="fact"><b>88</b><span>potwierdzonych w nagraniach / confirmed in recordings</span></div>
+  <div class="fact"><b>1 : 400</b><span>wszystkich ramek czasu / of all time frames</span></div>
+  <div class="fact"><b>0,50–0,60 s</b><span>po początku slotu S, co 20 ms / after slot S begins, 20 ms steps</span></div>
+</div>
+
+<h2>Co się dzieje <span class="sl">/ What happens</span></h2>
+<div class="timeline">
+<svg viewBox="0 0 900 200" role="img" aria-label="Slot S zawiera ramkę slotu S+3 od 0,5–0,6 s; slot S+3 jest pusty / Slot S carries the frame of slot S+3 from 0.5–0.6 s; slot S+3 is empty">
+  <style>
+    .t{font:12px var(--mono);fill:var(--muted)} .h{font:600 13px var(--sans);fill:var(--fg)}
+    .ln{stroke:var(--rule);stroke-width:1} .tick{stroke:var(--muted);stroke-width:1}
+    .reg{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1} .early{fill:var(--warn-soft);stroke:var(--warn);stroke-width:1.5}
+    .empty{fill:none;stroke:var(--muted);stroke-width:1;stroke-dasharray:4 4}
+  </style>
+  <line class="ln" x1="40" y1="120" x2="880" y2="120"/>
+  <line class="tick" x1="60" y1="112" x2="60" y2="128"/><text class="t" x="60" y="146" text-anchor="middle">S−3</text>
+  <line class="tick" x1="270" y1="112" x2="270" y2="128"/><text class="t" x="270" y="146" text-anchor="middle">S</text>
+  <line class="tick" x1="480" y1="112" x2="480" y2="128"/><text class="t" x="480" y="146" text-anchor="middle">S+3</text>
+  <line class="tick" x1="690" y1="112" x2="690" y2="128"/><text class="t" x="690" y="146" text-anchor="middle">S+6</text>
+  <text class="t" x="880" y="146" text-anchor="end">początki slotów co 3 s / slot starts, 3 s apart (UTC)</text>
+  <rect class="reg" x="60" y="70" width="134" height="36" rx="3"/><text class="t" x="127" y="86" text-anchor="middle">zwykła ramka</text><text class="t" x="127" y="100" text-anchor="middle">normal frame</text>
+  <rect class="early" x="309" y="70" width="134" height="36" rx="3"/><text class="h" x="376" y="86" text-anchor="middle">ramka slotu S+3</text><text class="t" x="376" y="100" text-anchor="middle">frame of S+3</text>
+  <rect class="empty" x="480" y="70" width="134" height="36" rx="3"/><text class="t" x="547" y="86" text-anchor="middle">pusty</text><text class="t" x="547" y="100" text-anchor="middle">empty</text>
+  <rect class="reg" x="690" y="70" width="134" height="36" rx="3"/><text class="t" x="757" y="86" text-anchor="middle">zwykła ramka</text><text class="t" x="757" y="100" text-anchor="middle">normal frame</text>
+  <line class="tick" x1="270" y1="52" x2="309" y2="52"/><line class="tick" x1="270" y1="46" x2="270" y2="58"/><line class="tick" x1="309" y1="46" x2="309" y2="58"/>
+  <text class="t" x="290" y="38" text-anchor="middle">0,50–0,60 s</text>
+  <path d="M 376 168 Q 430 182 480 168" fill="none" stroke="var(--warn)" stroke-width="1.2"/><text class="t" x="430" y="192" text-anchor="middle">2,40–2,50 s za wcześnie / early</text>
+</svg>
+</div>
+<div class="bi">
+<p class="cap"><span class="lang">PL</span> Ramka ma 96 bitów po 20 ms (1,92 s). Zwykłe ramki zaczynają się na granicy swojego slotu. Odchyłki w raporcie mierzono względem zwykłych ramek w tym samym nagraniu.</p>
+<p class="cap"><span class="lang">EN</span> A frame is 96 bits of 20 ms (1.92 s). Normal frames start at their slot boundary. Offsets in this report are measured against the normal frames in the same recording.</p>
+</div>
+
+<h2>Statystyka <span class="sl">/ Statistics</span></h2>
+<div class="grid2">
+  <div class="box">
+    <h3 style="margin:0 0 10px;font-size:15px">Początek wczesnej ramki / start offset of the early frame (84)</h3>
+    <div class="ob"><b>-2400 ms</b><span class="bar" style="width:33%"></span><em>8</em><small>początek / start 0.60 s w slocie S / into slot S</small></div><div class="ob"><b>-2420 ms</b><span class="bar" style="width:71%"></span><em>17</em><small>początek / start 0.58 s w slocie S / into slot S</small></div><div class="ob"><b>-2440 ms</b><span class="bar" style="width:100%"></span><em>24</em><small>początek / start 0.56 s w slocie S / into slot S</small></div><div class="ob"><b>-2460 ms</b><span class="bar" style="width:100%"></span><em>24</em><small>początek / start 0.54 s w slocie S / into slot S</small></div><div class="ob"><b>-2480 ms</b><span class="bar" style="width:42%"></span><em>10</em><small>początek / start 0.52 s w slocie S / into slot S</small></div><div class="ob"><b>-2500 ms</b><span class="bar" style="width:4%"></span><em>1</em><small>początek / start 0.50 s w slocie S / into slot S</small></div>
+    <p class="cap">Wszystkie wartości leżą w granicach 0,7 ms od siatki 20 ms: początek to 0,5 s plus 0–5 bitów od początku slotu S. / All values lie within 0.7 ms of the 20 ms bit grid: the start is 0.5 s plus 0–5 bit periods after the start of slot S.</p>
+  </div>
+  <div class="box">
+    <h3 style="margin:0 0 10px;font-size:15px">Potwierdzone zdarzenia wg godziny / confirmed events by hour (UTC)</h3>
+    <div class="hours"><div class="hb" title="00 UTC: 2"><span style="height:25%"></span><i>00</i></div><div class="hb" title="01 UTC: 2"><span style="height:25%"></span><i>01</i></div><div class="hb" title="02 UTC: 3"><span style="height:38%"></span><i>02</i></div><div class="hb" title="03 UTC: 4"><span style="height:50%"></span><i>03</i></div><div class="hb" title="04 UTC: 2"><span style="height:25%"></span><i>04</i></div><div class="hb" title="05 UTC: 4"><span style="height:50%"></span><i>05</i></div><div class="hb" title="06 UTC: 5"><span style="height:62%"></span><i>06</i></div><div class="hb" title="07 UTC: 2"><span style="height:25%"></span><i>07</i></div><div class="hb" title="08 UTC: 4"><span style="height:50%"></span><i>08</i></div><div class="hb" title="09 UTC: 1"><span style="height:12%"></span><i>09</i></div><div class="hb" title="10 UTC: 3"><span style="height:38%"></span><i>10</i></div><div class="hb" title="11 UTC: 8"><span style="height:100%"></span><i>11</i></div><div class="hb" title="12 UTC: 7"><span style="height:88%"></span><i>12</i></div><div class="hb" title="13 UTC: 7"><span style="height:88%"></span><i>13</i></div><div class="hb" title="14 UTC: 2"><span style="height:25%"></span><i>14</i></div><div class="hb" title="15 UTC: 2"><span style="height:25%"></span><i>15</i></div><div class="hb" title="16 UTC: 8"><span style="height:100%"></span><i>16</i></div><div class="hb" title="17 UTC: 2"><span style="height:25%"></span><i>17</i></div><div class="hb" title="18 UTC: 5"><span style="height:62%"></span><i>18</i></div><div class="hb" title="19 UTC: 0"><span style="height:0%"></span><i>19</i></div><div class="hb" title="20 UTC: 3"><span style="height:38%"></span><i>20</i></div><div class="hb" title="21 UTC: 4"><span style="height:50%"></span><i>21</i></div><div class="hb" title="22 UTC: 5"><span style="height:62%"></span><i>22</i></div><div class="hb" title="23 UTC: 3"><span style="height:38%"></span><i>23</i></div></div>
+    <p class="cap">Rozkład równomierny w granicach rozrzutu (test χ², p = 0,25) / uniform within statistical scatter (χ² test, p = 0.25). Dziennie / per day: 27.09: 15 · 28.09: 19 · 29.09: 16 · 30.09: 15 · 01.10: 19 · 02.10: 4 (25–27.09 niepełne pokrycie / partial coverage).</p>
+  </div>
+</div>
+<div class="bi">
+<div><span class="lang">PL</span><ul>
+  <li><b>Częstość.</b> Niezależne odbiorniki: od 1 na 394 do 1 na 434 ramek czasu (KiwiSDR Řevnice 68 na 27 056 ramek; IC-7610 Wrocław 57 na 24 743; IC-705 Wrocław 20 na 8 365). W całym okresie ok. 0,7 na godzinę.</li>
+  <li><b>Położenie w minucie.</b> Wczesne ramki trafiają ramki czasu poszczególnych slotów proporcjonalnie do tego, jak często dany slot niesie ramkę czasu (p = 0,44). Najwięcej zdarzeń ma więc slot w sekundzie :03, który niesie ramkę czasu prawie w każdej minucie.</li>
+  <li><b>Odstępy.</b> Odstępy między zdarzeniami mają rozkład wykładniczy, jak dla niezależnych zdarzeń losowych (średnio 84 min, współczynnik zmienności 0,89, test Kołmogorowa–Smirnowa względem rozkładu wykładniczego p = 0,91). Najkrótszy odstęp 4,05 min, najdłuższy 5,4 h. Brak serii i okresowości.</li>
+  <li><b>Poprzednia transmisja.</b> Zawartość slotu przed S (ramka czasu, inna wiadomość lub nic) nie ma wpływu: w porównaniu ze zwykłymi ramkami czasu na tych samych pozycjach rozkład się zgadza (z ≈ −1). Czas początku wczesnej ramki jest we wszystkich trzech przypadkach taki sam.</li>
+  <li><b>Sygnał.</b> Wczesne ramki mają normalny poziom i jakość (mediana SNR 17 dB, korelacja preambuły 0,98, bez poprawek Reeda–Solomona).</li>
+  <li><b>Ta sama chwila wszędzie.</b> 19 zdarzeń zarejestrowanych jednocześnie przez KiwiSDR w Řevnicach (czas GPS) i IC-7610 we Wrocławiu zgadza się w granicach 0,9 ms; 55 zdarzeń zdekodowały co najmniej trzy odbiorniki.</li>
+</ul></div>
+<div><span class="lang">EN</span><ul>
+  <li><b>Rate.</b> Independent receivers give 1 in 394 to 1 in 434 time frames (KiwiSDR Řevnice 68 in 27 056 frames; IC-7610 Wrocław 57 in 24 743; IC-705 Wrocław 20 in 8 365). Over the whole period about 0.7 per hour.</li>
+  <li><b>Timing in the minute.</b> Early frames hit the time frames of each slot in proportion to how often that slot carries a time frame (p = 0.44). The slot at second :03, which carries a time frame almost every minute, therefore has the most events.</li>
+  <li><b>Spacing.</b> The intervals between events follow an exponential distribution, as for independent random events (mean 84 min, coefficient of variation 0.89, Kolmogorov–Smirnov test against exponential p = 0.91). Shortest interval 4.05 min, longest 5.4 h. No bursts or periodicity.</li>
+  <li><b>Preceding transmission.</b> What the slot before S carried (time frame, other message, or nothing) has no influence: compared with normal time frames in the same position, the distribution matches (z ≈ −1). The early start time is the same in all three cases.</li>
+  <li><b>Signal.</b> Early frames have normal strength and quality (median SNR 17 dB, preamble correlation 0.98, no Reed–Solomon corrections needed).</li>
+  <li><b>Same instant everywhere.</b> 19 events recorded both by the GPS-timed KiwiSDR in Řevnice and the IC-7610 in Wrocław agree within 0.9 ms; 55 events were decoded by three or more receivers.</li>
+</ul></div>
+</div>
+
+<h2>Obserwacje pomocne w znalezieniu przyczyny <span class="sl">/ Observations that may help to locate the cause</span></h2>
+<div class="bi">
+<div><span class="lang">PL</span><ul>
+  <li><b>Treść ramki jest poprawna, błędny jest tylko jej początek.</b> Wczesna ramka zawiera już właściwy czas slotu S+3, więc ramka dla S+3 była gotowa co najmniej 2,4–2,5 s przed swoim slotem. Budowanie ramki działa; ramka zostaje przekazana do modulatora o jeden slot za wcześnie.</li>
+  <li><b>Wczesny początek jest związany ze slotem S, a nie z końcem poprzedniej transmisji.</b> Wypada zawsze 0,50 s po początku slotu S plus 0–5 pełnych bitów, niezależnie od tego, co nadawano wcześniej. Punkt 0,5 s pokrywa się z położeniem „0” znacznika 1-0-1 w ramce, która zaczynałaby się w slocie S.</li>
+  <li><b>Kwantyzacja do zegara bitowego</b> (kroki 20 ms, rozrzut 0–5 bitów) sugeruje, że transmisję uruchamia zegar modulatora o częstotliwości bitowej po zmiennym opóźnieniu 0–100 ms (np. opóźnienie programowe), gdy ramka czeka w buforze nadawczym.</li>
+  <li><b>Zdarza się tylko, gdy slot S jest poza tym wolny</b>, a slot S+3 pozostaje wtedy pusty: ramka S+3 jest nadawana raz, wcześniej, bez powtórzenia.</li>
+  <li><b>Losowo w czasie, dla ok. 0,25 % ramek czasu</b>, bez zależności od pory doby, położenia w minucie i ruchu. Taki obraz jest typowy dla wyścigu (race condition) między dwoma asynchronicznymi procesami (np. przygotowaniem ramki i bramkowaniem slotu albo timerem i flagą gotowości bufora), a nie dla błędu w samym harmonogramie.</li>
+  <li><b>Pierwsze zalogowane zdarzenie</b>: 25.09.2026, 23:47 UTC (jeden odbiornik); pierwsze potwierdzone w nagraniu: 27.09.2026, 00:03 UTC. Częstość stała do 2.10.</li>
+</ul></div>
+<div><span class="lang">EN</span><ul>
+  <li><b>The frame content is right, only its start is wrong.</b> The early frame already carries the correct time of slot S+3, so the frame for S+3 was complete at least 2.4–2.5 s before its slot. Building the frame works; the frame is released to the modulator one slot too early.</li>
+  <li><b>The early start is tied to slot S, not to the end of a previous transmission.</b> It is always 0.50 s after the start of slot S plus 0–5 whole bits, regardless of what was sent before. The 0.5 s point coincides with the position of the "0" of the 1-0-1 marker in a frame that would start at slot S.</li>
+  <li><b>Quantisation to the bit clock</b> (20 ms steps, spread over 0–5 bits) suggests the transmission is started by the bit-rate modulator clock after a variable delay of 0–100 ms (such as software latency), once a frame is waiting in the transmit buffer.</li>
+  <li><b>It only happens when slot S is otherwise free</b>, and slot S+3 then stays empty: the S+3 frame is sent once, early, not repeated.</li>
+  <li><b>Random in time at about 0.25 % of time frames</b>, with no dependence on time of day, minute position or traffic. That pattern is typical of a race between two asynchronous processes (for example frame preparation and slot gating, or a timer and a buffer-ready flag), rather than an error in the schedule itself.</li>
+  <li><b>First logged</b> on 25 September 2026 at 23:47 UTC (single receiver); first confirmed in a recording on 27 September at 00:03 UTC. The rate stayed constant until 2 October.</li>
+</ul></div>
+</div>
+
+<h2>Odbiorniki i weryfikacja <span class="sl">/ Receivers and verification</span></h2>
+<div class="bi">
+<div><span class="lang">PL</span><ul>
+  <li><b>Legnica</b>: samodzielny odbiornik e-CzasPL (dsPIC33 z układem SI4735), od 25.09.</li>
+  <li><b>Wrocław</b>: ICOM IC-705 (26–28.09) i ICOM IC-7610 (od 28.09) z nagrywaniem odbieranego sygnału; odbiornik z bezpośrednim próbkowaniem na STM32 (NUCLEO-H723ZG) synchronizowany do GPS (od 27.09).</li>
+  <li><b>Řevnice, Czechy</b>: publiczny KiwiSDR ze znacznikami czasu GPS, 239 km od Wrocławia, nagrywany od 28.09.</li>
+  <li><b>Weryfikacja</b>: surowe nagrania (KiwiSDR, IC-7610, IC-705) zdekodowano ponownie osobnym demodulatorem i dekoderem napisanym wyłącznie na podstawie opisu ramki GUM. Każdą wczesną ramkę zmierzono względem zwykłych ramek przed nią i po niej w tym samym nagraniu. Ta kontrola potwierdziła 88 zdarzeń, nie znalazła wczesnych ramek poza wymienionymi i wykazała, że restarty plików nagrań nie mogą wytworzyć takich zdarzeń (dają odchyłki poza siatką 20 ms).</li>
+  <li><b>Niepotwierdzone w nagraniach</b>: 6 zdarzeń widzianych tylko przez odbiornik w Legnicy (25–26.09) i 2 widziane tylko przez odbiornik STM32 (28.09), dla których nie ma surowego nagrania, oraz jedno zdarzenie (27.09 06:37:18), którego ramka jest widoczna, ale nie dała się zdekodować bezbłędnie. Wymieniono je dla kompletności i oznaczono.</li>
+</ul></div>
+<div><span class="lang">EN</span><ul>
+  <li><b>Legnica</b>: stand-alone e-CzasPL receiver (dsPIC33 with SI4735 front end), from 25.09.</li>
+  <li><b>Wrocław</b>: ICOM IC-705 (26–28.09) and ICOM IC-7610 (from 28.09) recording the received signal; an STM32 (NUCLEO-H723ZG) direct-sampling receiver disciplined to GPS (from 27.09).</li>
+  <li><b>Řevnice, Czech Republic</b>: a public KiwiSDR with GPS time stamps, 239 km from Wrocław, recorded from 28.09.</li>
+  <li><b>Verification</b>: the raw recordings (KiwiSDR, IC-7610, IC-705) were decoded again with a separate demodulator and decoder written only from GUM's frame description. Each early frame was timed against the normal frames before and after it in the same recording. That check confirmed 88 events, found no early frames beyond those listed, and showed that recorder file restarts cannot produce these events (they give offsets off the 20 ms grid).</li>
+  <li><b>Not confirmed in recordings</b>: 6 events seen only by the Legnica receiver (25–26.09) and 2 seen only by the STM32 receiver (28.09), for which no raw recording exists, and one event (27.09 06:37:18) whose frame is visible but could not be decoded error-free. They are listed for completeness and marked.</li>
+</ul></div>
+</div>
+
+<h2>Wszystkie zdarzenia <span class="sl">/ All events</span></h2>
+<div class="legend"><span><span class="pill ok">potwierdzone / verified</span> w surowych nagraniach / in raw recordings</span><span><span class="pill pr">prawdopodobne / probable</span> ramka widoczna, bez bezbłędnego dekodowania / visible, not decoded error-free</span><span><span class="pill un">jeden odbiornik / single receiver</span> bez nagrania / no recording</span></div>
+<div class="tablebox">
+<table>
+<thead><tr><th>#</th><th>nadana w slocie S / sent in slot S (UTC)</th><th>czas ramki = slot S+3 / frame time (UTC)</th><th>N</th><th>odchyłka / offset ms</th><th>odbiorniki / receivers</th><th>status</th></tr></thead>
+<tbody>
+<tr class="un"><td>1</td><td>2026-09-25 23:47:12</td><td>2026-09-25 23:47:15</td><td></td><td>-2419</td><td>Legnica</td><td><span class="pill un">jeden odbiornik / single receiver</span></td></tr>
+<tr class="un"><td>2</td><td>2026-09-26 04:44:36</td><td>2026-09-26 04:44:39</td><td></td><td>-2460</td><td>Legnica</td><td><span class="pill un">jeden odbiornik / single receiver</span></td></tr>
+<tr class="un"><td>3</td><td>2026-09-26 07:12:00</td><td>2026-09-26 07:12:03</td><td></td><td>-2459</td><td>Legnica</td><td><span class="pill un">jeden odbiornik / single receiver</span></td></tr>
+<tr class="un"><td>4</td><td>2026-09-26 11:12:21</td><td>2026-09-26 11:12:24</td><td></td><td>-2439</td><td>Legnica</td><td><span class="pill un">jeden odbiornik / single receiver</span></td></tr>
+<tr class="un"><td>5</td><td>2026-09-26 11:35:27</td><td>2026-09-26 11:35:30</td><td></td><td>-2480</td><td>Legnica</td><td><span class="pill un">jeden odbiornik / single receiver</span></td></tr>
+<tr class="un"><td>6</td><td>2026-09-26 15:49:48</td><td>2026-09-26 15:49:51</td><td></td><td>-2419</td><td>Legnica</td><td><span class="pill un">jeden odbiornik / single receiver</span></td></tr>
+<tr class="ok"><td>7</td><td>2026-09-27 00:02:57</td><td>2026-09-27 00:03:00</td><td>281260860</td><td>-2476</td><td>IC-705</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="pr"><td>8</td><td>2026-09-27 06:37:15</td><td>2026-09-27 06:37:18</td><td>281268746</td><td>-2400</td><td>Legnica, IC-705</td><td><span class="pill pr">prawdopodobne / probable</span></td></tr>
+<tr class="ok"><td>9</td><td>2026-09-27 08:27:51</td><td>2026-09-27 08:27:54</td><td>281270958</td><td>-2442</td><td>IC-705</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>10</td><td>2026-09-27 08:51:42</td><td>2026-09-27 08:51:45</td><td>281271435</td><td>-2433</td><td>IC-705</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>11</td><td>2026-09-27 11:46:00</td><td>2026-09-27 11:46:03</td><td>281274921</td><td>-2408</td><td>IC-705</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>12</td><td>2026-09-27 12:07:48</td><td>2026-09-27 12:07:51</td><td>281275357</td><td>-2450</td><td>IC-705</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>13</td><td>2026-09-27 13:04:27</td><td>2026-09-27 13:04:30</td><td>281276490</td><td>-2403</td><td>IC-705</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>14</td><td>2026-09-27 13:17:00</td><td>2026-09-27 13:17:03</td><td>281276741</td><td>-2468</td><td>IC-705</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>15</td><td>2026-09-27 13:18:24</td><td>2026-09-27 13:18:27</td><td>281276769</td><td>-2431</td><td>IC-705</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>16</td><td>2026-09-27 13:19:48</td><td>2026-09-27 13:19:51</td><td>281276797</td><td>-2434</td><td>IC-705</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>17</td><td>2026-09-27 13:21:39</td><td>2026-09-27 13:21:42</td><td>281276834</td><td>-2478</td><td>IC-705</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>18</td><td>2026-09-27 16:19:12</td><td>2026-09-27 16:19:15</td><td>281280385</td><td>-2475</td><td>IC-705, NUCLEO</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>19</td><td>2026-09-27 18:30:15</td><td>2026-09-27 18:30:18</td><td>281283006</td><td>-2437</td><td>IC-705, NUCLEO</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>20</td><td>2026-09-27 18:41:00</td><td>2026-09-27 18:41:03</td><td>281283221</td><td>-2418</td><td>IC-705, NUCLEO</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>21</td><td>2026-09-27 23:20:00</td><td>2026-09-27 23:20:03</td><td>281288801</td><td>-2417</td><td>IC-705, NUCLEO</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>22</td><td>2026-09-27 23:20:36</td><td>2026-09-27 23:20:39</td><td>281288813</td><td>-2439</td><td>IC-705, NUCLEO</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>23</td><td>2026-09-28 00:13:57</td><td>2026-09-28 00:14:00</td><td>281289880</td><td>-2441</td><td>IC-705, NUCLEO</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="un"><td>24</td><td>2026-09-28 03:06:39</td><td>2026-09-28 03:06:42</td><td></td><td>-2460</td><td>NUCLEO</td><td><span class="pill un">jeden odbiornik / single receiver</span></td></tr>
+<tr class="un"><td>25</td><td>2026-09-28 03:21:54</td><td>2026-09-28 03:21:57</td><td></td><td>-2440</td><td>NUCLEO</td><td><span class="pill un">jeden odbiornik / single receiver</span></td></tr>
+<tr class="ok"><td>26</td><td>2026-09-28 06:40:15</td><td>2026-09-28 06:40:18</td><td>281297606</td><td>-2456</td><td>IC-705, NUCLEO</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>27</td><td>2026-09-28 08:32:36</td><td>2026-09-28 08:32:39</td><td>281299853</td><td>-2480</td><td>IC-705, NUCLEO</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>28</td><td>2026-09-28 08:34:00</td><td>2026-09-28 08:34:03</td><td>281299881</td><td>-2442</td><td>IC-705, NUCLEO</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>29</td><td>2026-09-28 11:02:00</td><td>2026-09-28 11:02:03</td><td>281302841</td><td>-2460</td><td>NUCLEO, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>30</td><td>2026-09-28 11:11:09</td><td>2026-09-28 11:11:12</td><td>281303024</td><td>-2440</td><td>KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>31</td><td>2026-09-28 11:54:42</td><td>2026-09-28 11:54:45</td><td>281303895</td><td>-2440</td><td>NUCLEO, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>32</td><td>2026-09-28 12:13:00</td><td>2026-09-28 12:13:03</td><td>281304261</td><td>-2460</td><td>NUCLEO, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>33</td><td>2026-09-28 12:26:09</td><td>2026-09-28 12:26:12</td><td>281304524</td><td>-2460</td><td>NUCLEO, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>34</td><td>2026-09-28 12:48:00</td><td>2026-09-28 12:48:03</td><td>281304961</td><td>-2500</td><td>NUCLEO, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>35</td><td>2026-09-28 13:03:27</td><td>2026-09-28 13:03:30</td><td>281305270</td><td>-2440</td><td>NUCLEO, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>36</td><td>2026-09-28 14:50:15</td><td>2026-09-28 14:50:18</td><td>281307406</td><td>-2460</td><td>NUCLEO, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>37</td><td>2026-09-28 16:01:00</td><td>2026-09-28 16:01:03</td><td>281308821</td><td>-2400</td><td>NUCLEO, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>38</td><td>2026-09-28 16:32:15</td><td>2026-09-28 16:32:18</td><td>281309446</td><td>-2460</td><td>NUCLEO, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>39</td><td>2026-09-28 16:41:51</td><td>2026-09-28 16:41:54</td><td>281309638</td><td>-2420</td><td>NUCLEO, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>40</td><td>2026-09-28 18:57:57</td><td>2026-09-28 18:58:00</td><td>281312360</td><td>-2419</td><td>NUCLEO, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>41</td><td>2026-09-28 20:06:15</td><td>2026-09-28 20:06:18</td><td>281313726</td><td>-2439</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>42</td><td>2026-09-28 20:36:39</td><td>2026-09-28 20:36:42</td><td>281314334</td><td>-2420</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>43</td><td>2026-09-28 22:51:24</td><td>2026-09-28 22:51:27</td><td>281317029</td><td>-2460</td><td>NUCLEO, IC-7610</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>44</td><td>2026-09-29 01:58:00</td><td>2026-09-29 01:58:03</td><td>281320761</td><td>-2400</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>45</td><td>2026-09-29 02:31:12</td><td>2026-09-29 02:31:15</td><td>281321425</td><td>-2420</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>46</td><td>2026-09-29 03:37:18</td><td>2026-09-29 03:37:21</td><td>281322747</td><td>-2460</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>47</td><td>2026-09-29 03:42:57</td><td>2026-09-29 03:43:00</td><td>281322860</td><td>-2480</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>48</td><td>2026-09-29 04:05:00</td><td>2026-09-29 04:05:03</td><td>281323301</td><td>-2439</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>49</td><td>2026-09-29 05:14:24</td><td>2026-09-29 05:14:27</td><td>281324689</td><td>-2460</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>50</td><td>2026-09-29 06:55:00</td><td>2026-09-29 06:55:03</td><td>281326701</td><td>-2460</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>51</td><td>2026-09-29 10:23:27</td><td>2026-09-29 10:23:30</td><td>281330870</td><td>-2460</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>52</td><td>2026-09-29 11:11:00</td><td>2026-09-29 11:11:03</td><td>281331821</td><td>-2460</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>53</td><td>2026-09-29 11:26:36</td><td>2026-09-29 11:26:39</td><td>281332133</td><td>-2400</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>54</td><td>2026-09-29 11:42:57</td><td>2026-09-29 11:43:00</td><td>281332460</td><td>-2420</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>55</td><td>2026-09-29 16:13:12</td><td>2026-09-29 16:13:15</td><td>281337865</td><td>-2480</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>56</td><td>2026-09-29 17:40:21</td><td>2026-09-29 17:40:24</td><td>281339608</td><td>-2439</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>57</td><td>2026-09-29 21:09:00</td><td>2026-09-29 21:09:03</td><td>281343781</td><td>-2440</td><td>Legnica, NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>58</td><td>2026-09-29 22:49:36</td><td>2026-09-29 22:49:39</td><td>281345793</td><td>-2419</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>59</td><td>2026-09-29 23:29:42</td><td>2026-09-29 23:29:45</td><td>281346595</td><td>-2439</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>60</td><td>2026-09-30 01:01:39</td><td>2026-09-30 01:01:42</td><td>281348434</td><td>-2440</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>61</td><td>2026-09-30 02:52:21</td><td>2026-09-30 02:52:24</td><td>281350648</td><td>-2420</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>62</td><td>2026-09-30 06:24:00</td><td>2026-09-30 06:24:03</td><td>281354881</td><td>-2440</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>63</td><td>2026-09-30 07:37:00</td><td>2026-09-30 07:37:03</td><td>281356341</td><td>-2459</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>64</td><td>2026-09-30 07:41:45</td><td>2026-09-30 07:41:48</td><td>281356436</td><td>-2439</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>65</td><td>2026-09-30 10:20:36</td><td>2026-09-30 10:20:39</td><td>281359613</td><td>-2460</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>66</td><td>2026-09-30 10:41:21</td><td>2026-09-30 10:41:24</td><td>281360028</td><td>-2460</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>67</td><td>2026-09-30 14:14:27</td><td>2026-09-30 14:14:30</td><td>281364290</td><td>-2440</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>68</td><td>2026-09-30 15:55:21</td><td>2026-09-30 15:55:24</td><td>281366308</td><td>-2419</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>69</td><td>2026-09-30 16:12:00</td><td>2026-09-30 16:12:03</td><td>281366641</td><td>-2400</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>70</td><td>2026-09-30 18:37:00</td><td>2026-09-30 18:37:03</td><td>281369541</td><td>-2420</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>71</td><td>2026-09-30 20:56:36</td><td>2026-09-30 20:56:39</td><td>281372333</td><td>-2440</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>72</td><td>2026-09-30 21:41:57</td><td>2026-09-30 21:42:00</td><td>281373240</td><td>-2459</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>73</td><td>2026-09-30 22:14:36</td><td>2026-09-30 22:14:39</td><td>281373893</td><td>-2479</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>74</td><td>2026-09-30 22:44:00</td><td>2026-09-30 22:44:03</td><td>281374481</td><td>-2460</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>75</td><td>2026-10-01 02:01:45</td><td>2026-10-01 02:01:48</td><td>281378436</td><td>-2460</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>76</td><td>2026-10-01 04:35:42</td><td>2026-10-01 04:35:45</td><td>281381515</td><td>-2440</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>77</td><td>2026-10-01 05:01:48</td><td>2026-10-01 05:01:51</td><td>281382037</td><td>-2459</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>78</td><td>2026-10-01 05:09:45</td><td>2026-10-01 05:09:48</td><td>281382196</td><td>-2459</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>79</td><td>2026-10-01 05:25:12</td><td>2026-10-01 05:25:15</td><td>281382505</td><td>-2420</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>80</td><td>2026-10-01 06:53:51</td><td>2026-10-01 06:53:54</td><td>281384278</td><td>-2399</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>81</td><td>2026-10-01 11:20:36</td><td>2026-10-01 11:20:39</td><td>281389613</td><td>-2400</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>82</td><td>2026-10-01 12:42:45</td><td>2026-10-01 12:42:48</td><td>281391256</td><td>-2420</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>83</td><td>2026-10-01 12:46:48</td><td>2026-10-01 12:46:51</td><td>281391337</td><td>-2419</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>84</td><td>2026-10-01 12:52:36</td><td>2026-10-01 12:52:39</td><td>281391453</td><td>-2440</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>85</td><td>2026-10-01 13:51:39</td><td>2026-10-01 13:51:42</td><td>281392634</td><td>-2440</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>86</td><td>2026-10-01 15:19:00</td><td>2026-10-01 15:19:03</td><td>281394381</td><td>-2440</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>87</td><td>2026-10-01 16:00:00</td><td>2026-10-01 16:00:03</td><td>281395201</td><td>-2460</td><td>NUCLEO, IC-7610</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>88</td><td>2026-10-01 16:21:00</td><td>2026-10-01 16:21:03</td><td>281395621</td><td>-2479</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>89</td><td>2026-10-01 17:40:24</td><td>2026-10-01 17:40:27</td><td>281397209</td><td>-2439</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>90</td><td>2026-10-01 18:30:36</td><td>2026-10-01 18:30:39</td><td>281398213</td><td>-2460</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>91</td><td>2026-10-01 21:12:00</td><td>2026-10-01 21:12:03</td><td>281401441</td><td>-2419</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>92</td><td>2026-10-01 21:53:36</td><td>2026-10-01 21:53:39</td><td>281402273</td><td>-2440</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>93</td><td>2026-10-01 22:23:21</td><td>2026-10-01 22:23:24</td><td>281402868</td><td>-2480</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>94</td><td>2026-10-02 03:49:09</td><td>2026-10-02 03:49:12</td><td>281409384</td><td>-2439</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>95</td><td>2026-10-02 03:57:00</td><td>2026-10-02 03:57:03</td><td>281409541</td><td>-2480</td><td>Legnica, NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>96</td><td>2026-10-02 06:56:36</td><td>2026-10-02 06:56:39</td><td>281413133</td><td>-2420</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+<tr class="ok"><td>97</td><td>2026-10-02 09:15:45</td><td>2026-10-02 09:15:48</td><td>281415916</td><td>-2420</td><td>NUCLEO, IC-7610, KiwiSDR CZ</td><td><span class="pill ok">potwierdzone / verified</span></td></tr>
+</tbody>
+</table>
+</div>
+<div class="bi">
+<p class="cap"><span class="lang">PL</span> Odchyłka: początek wczesnej ramki względem początku jej własnego slotu S+3 (mediana z odbiorników, które ją zdekodowały). N: pole czasu ramki, czas = 3·N sekund od 2000-01-01 00:00 UTC.</p>
+<p class="cap"><span class="lang">EN</span> Offset: start of the early frame relative to the start of its own slot S+3 (median over the receivers that decoded it). N: the frame's time field, time = 3·N seconds after 2000-01-01 00:00 UTC.</p>
+</div>
+
+<footer>Nagrania, tabele slotów i źródła dekoderów udostępnimy na życzenie. / Recordings, per-slot tables and decoder sources are available on request. · 2.10.2026 · Dawid, SQ6EMM</footer>
+</div>
+
+</body>
+</html>

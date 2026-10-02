@@ -27,6 +27,7 @@ LOG = os.environ.get("LOG", "/log/rx.log")
 PORT = int(os.environ.get("PORT", "8077"))
 GPS_FROM = os.environ.get("GPS_FROM", "2026-10-01T18:10")
 REDRAW = 120
+STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")   # static pages (e.g. early_frames.html)
 SLOPE_PPB, CODE_REF = 0.816, 2252.5     # EFC slope [ppb/code] (measured 28 Sep) and the reference code
 RANGES = {"6": 6, "24": 24, "72": 72, "all": None}
 
@@ -437,6 +438,7 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport"
 table{{border-collapse:collapse;font-size:13px}} td,th{{border:1px solid #ccc;padding:2px 6px;text-align:right}} th{{background:#eee}}
 a.on{{font-weight:bold}} h2{{margin-top:28px}}</style></head><body>
 <h1>NUCLEO receiver: carriers against GPS, decodes per hour</h1>
+<p><a href="early_frames.html">e-CzasPL early time frames: observation report (PL/EN, static, 2 Oct 2026)</a></p>
 <p>range: {links} &middot; updated {upd} UTC (charts redrawn at most every {redraw} s, page reloads every 5 min) &middot; source: rx.log, GPS lock since {gps_from} UTC; strips at the top of each chart = night (sun below the horizon) at Wroclaw (receiver) / Solec Kujawski (e-CzasPL) / Mainflingen (DCF77)</p>
 {summary_cur}
 <h2>Carrier frequency against GPS</h2><img src="carriers.png?r={r}&v={v}">
@@ -469,7 +471,9 @@ class H(BaseHTTPRequestHandler):
         # counts, and the page uses relative links
         last = u.path.rsplit("/", 1)[-1]
         name = last.removesuffix(".png")
-        if last.endswith(".png") and name in c[1]:
+        if last.endswith(".html") and last != "index.html" and os.path.isfile(os.path.join(STATIC, last)):
+            body, ctype = open(os.path.join(STATIC, last), "rb").read(), "text/html; charset=utf-8"
+        elif last.endswith(".png") and name in c[1]:
             body, ctype = c[1][name], "image/png"
         elif last in ("", "index.html"):
             links = " ".join(f'<a class="{"on" if k == rng else ""}" href="?r={k}">{"all" if k == "all" else k + " h"}</a>' for k in RANGES)
