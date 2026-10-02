@@ -43,6 +43,11 @@ lock = threading.Lock()
 refs = {}        # minute (int, unix // 60) -> dict(g, ph, n, d, e, sus)
 ocxo = {}        # minute -> (efc, source)
 stats = {}       # hour start (datetime) -> dict
+pps = {}         # minute -> [sum e-CzasPL clock ms, n, sum DCF77 second ms (phase code), n] from the GPS PPS lines
+boots = []       # NUCLEO boot times (first STATUS line at uptime 10 s)
+P_PPS = re.compile(r"^(\S+?)\+00:00 .*\] GPS +PPS #\d+ .*?\| e-CzasPL clock ([-+]?\d+\.\d+) ms \| DCF77 second ([-+]?\d+\.\d+|-) ms \((.*?)\)")
+P_BOOT = re.compile(r"^(\S+?)\+00:00 \[ +10\.0\] STATUS")
+PROP_E, PROP_D = 0.765, 1.912    # ground-wave delays from the receiver [ms]: Solec Kujawski 229.3 km, Mainflingen 573.2 km
 pos = 0
 cache = {}       # range -> (time, {name: png bytes}, summary html)
 
@@ -84,6 +89,17 @@ def read_log():
             if m:
                 t = ts(m.group(1))
                 with lock: ocxo[int(t.timestamp() // 60)] = (float(m.group(2)), m.group(3).rstrip(","))
+        elif "] GPS     PPS" in l:
+            m = P_PPS.match(l)
+            if m:
+                e = float(m.group(2)); mi = int(ts(m.group(1)).timestamp() // 60)
+                if -14.0 < e < -8.0:                                  # drop garbled lines
+                    with lock:
+                        a = pps.setdefault(mi, [0.0, 0, 0.0, 0]); a[0] += e; a[1] += 1
+                        if m.group(3) != "-" and "phase" in m.group(4) and -5.0 < float(m.group(3)) < 1.0:
+                            a[2] += float(m.group(3)); a[3] += 1
+        elif "] STATUS" in l and P_BOOT.match(l):
+            with lock: boots.append(ts(l[:19]))
         elif "] STATS" in l:
             m = P_STATS.match(l)
             if m:
@@ -224,6 +240,42 @@ def render(rng):
     ax.set_title("OCXO free-running frequency (GPS-measured frequency + EFC slope x code offset; > 0: slow)", fontsize=10, loc="left")
     out["free"] = png(fig)
 
+    # 3c) e-CzasPL (225 kHz) against GPS: carrier frequency and second misalignment (GUM 2 Oct 2026: both come
+    #     from one OCXO for now -> the second drifts at -carrier offset x 86400 s per day)
+    with lock:
+        pk = [k for k in sorted(pps) if k >= r0 and pps[k][1] >= 30]
+        lat = np.array([-pps[k][0] / pps[k][1] - PROP_E for k in pk])       # ms late at the transmitter
+        bl = [b for b in boots if b >= t0]
+    tl = np.array([dt.datetime.fromtimestamp(k * 60, dt.timezone.utc) for k in pk])
+    fig, axs = plt.subplots(2, 1, figsize=(12, 7), sharex=True)
+    ax = axs[0]; shade_night(ax, t0, now)
+    ev = e[~np.isnan(e)] if len(t) else np.array([])
+    if len(t):
+        ax.plot(t, e, ".", ms=2.5, color="tab:red", alpha=0.3, label="1-min")
+        ax.plot(t, rolling(e, 60, 40), "-", lw=1.8, color="darkred", label="60-min mean")
+        if len(ev) > 10:
+            lo, hi = np.percentile(ev, [1, 99]); pad = 0.3 * (hi - lo) + 0.2; ax.set_ylim(lo - pad, hi + pad)
+    ax.axhline(0, color="k", lw=0.8)
+    ax.set_ylabel("ppb"); ax.grid(alpha=0.3); ax.legend(loc="upper left", fontsize=8)
+    sec = ax.secondary_yaxis("right", functions=(lambda x: x * 0.225, lambda x: x / 0.225)); sec.set_ylabel("mHz at 225 kHz")
+    ax.set_title("e-CzasPL 225 kHz carrier frequency - GPS: " + (f"mean {ev.mean():+.3f} ppb ({ev.mean()*0.225:+.3f} mHz), median {np.median(ev):+.3f} ppb" if len(ev) > 2 else "-"), fontsize=10, loc="left")
+    ax = axs[1]; shade_night(ax, t0, now)
+    txt = "-"
+    if len(pk) > 5:
+        ax.plot(tl, lat, ".", ms=2.5, color="tab:blue", alpha=0.35, label="1-min mean of the per-second values")
+        ax.plot(tl, rolling(lat, 60, 40), "-", lw=1.8, color="navy", label="60-min mean")
+        x = np.array([k / 1440.0 for k in pk]); A = np.polyfit(x, lat, 1)
+        ax.plot(tl, np.polyval(A, x), "--", color="k", lw=1, label=f"fit: {A[0]:+.3f} ms/day")
+        pred = -ev.mean() * 0.0864 if len(ev) > 2 else float("nan")
+        txt = f"now {np.mean(lat[-10:]):.3f} ms late; drift {A[0]:+.3f} ms/day measured, {pred:+.3f} ms/day predicted from the carrier offset"
+        lo, hi = np.percentile(lat, [1, 99]); pad = 0.3 * (hi - lo) + 0.05; ax.set_ylim(lo - pad, hi + pad)
+    for b in bl: ax.axvline(b, color="0.5", ls=":", lw=1)
+    if bl: ax.plot([], [], ":", color="0.5", label="NUCLEO reboot / flash")
+    ax.set_ylabel("ms late"); ax.grid(alpha=0.3); ax.legend(loc="upper left", fontsize=8)
+    ax.xaxis.set_major_formatter(xfmt); fig.autofmt_xdate()
+    ax.set_title("e-CzasPL second (start of the 16-bit sync) after the GPS second, at the transmitter (path 0.765 ms removed)\n" + txt, fontsize=10, loc="left")
+    out["ecz"] = png(fig)
+
     # 4) hourly decodes vs expected
     with lock:
         hs = sorted(h for h in stats if (hours is None or h >= now - dt.timedelta(hours=hours + 1)))
@@ -302,6 +354,9 @@ a.on{{font-weight:bold}} h2{{margin-top:28px}}</style></head><body>
 <h2>Stability (Allan deviation)</h2><img src="adev.png?r={r}&v={v}">
 <h2>OCXO time error against GPS</h2><img src="phase.png?r={r}&v={v}">
 <h2>OCXO free-running frequency</h2><img src="free.png?r={r}&v={v}">
+<h2>e-CzasPL (225 kHz) against GPS: carrier frequency and second misalignment</h2>
+<p>GUM, 2 Oct 2026: the carrier and the frame start come from one OCXO for now (rubidium planned), so the second drifts by -(carrier offset) x 86400 s per day.</p>
+<img src="ecz.png?r={r}&v={v}">
 <h2>Decodes vs expected, per hour</h2><img src="decodes.png?r={r}&v={v}">
 <h2>Hourly table (latest first)</h2>{table}
 </body></html>"""
