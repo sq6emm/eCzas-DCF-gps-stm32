@@ -159,7 +159,7 @@ def png(fig):
     b = io.BytesIO(); fig.savefig(b, format="png", dpi=100, bbox_inches="tight"); plt.close(fig); return b.getvalue()
 
 
-SITES = (("Wroclaw (receiver)", 51.11, 17.04, "0.35"),             # grey background = night at the receiver
+SITES = (("Wroclaw (receiver)", 51.11, 17.04, "0.35"),
          ("Solec Kujawski (e-CzasPL)", 53.08, 18.23, "tab:red"),     # strips at the top of every time chart
          ("Mainflingen (DCF77)", 50.02, 9.01, "tab:blue"))
 
@@ -191,11 +191,9 @@ def night_spans(lat, lon, t0, t1):
 
 
 def shade_night(ax, t0, t1, legend=True):
-    """grey = night at Wroclaw; thin strips at the top = night at Wroclaw, Solec Kujawski, Mainflingen"""
+    """thin strips at the top = night (sun below the horizon) at Wroclaw, Solec Kujawski, Mainflingen"""
     for k, (name, la, lo, col) in enumerate(SITES):
         spans = night_spans(la, lo, t0, t1)
-        if k == 0:
-            for a, b in spans: ax.axvspan(a, b, color="0.92", zorder=0, lw=0)
         y1 = 1.0 - 0.025 * k; y0 = y1 - 0.022
         for a, b in spans: ax.axvspan(a, b, ymin=y0, ymax=y1, color=col, alpha=0.55, zorder=1, lw=0)
     ax.set_xlim(t0, t1)
@@ -392,7 +390,7 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport"
 table{{border-collapse:collapse;font-size:13px}} td,th{{border:1px solid #ccc;padding:2px 6px;text-align:right}} th{{background:#eee}}
 a.on{{font-weight:bold}} h2{{margin-top:28px}}</style></head><body>
 <h1>NUCLEO receiver: carriers against GPS, decodes per hour</h1>
-<p>range: {links} &middot; updated {upd} UTC (charts redrawn at most every {redraw} s, page reloads every 5 min) &middot; source: rx.log, GPS lock since {gps_from} UTC; grey background = night (sun below the horizon) at the receiver in Wroclaw, strips at the top of each chart = night at Wroclaw / Solec Kujawski (e-CzasPL) / Mainflingen (DCF77)</p>
+<p>range: {links} &middot; updated {upd} UTC (charts redrawn at most every {redraw} s, page reloads every 5 min) &middot; source: rx.log, GPS lock since {gps_from} UTC; strips at the top of each chart = night (sun below the horizon) at Wroclaw (receiver) / Solec Kujawski (e-CzasPL) / Mainflingen (DCF77)</p>
 {summary_cur}
 <h2>Carrier frequency against GPS</h2><img src="carriers.png?r={r}&v={v}">
 <h2>Stability (Allan deviation)</h2><img src="adev.png?r={r}&v={v}">
