@@ -69,6 +69,18 @@ static void civil_from_days(int64_t z, int *y, int *m, int *d)   /* days since 1
     *y = (int)(yoe + era * 400 + (*m <= 2));
 }
 
+/* summer time (CEST) in force in the minute utc_min (minutes since 2000-01-01 UTC)? EU rule:
+   from the last Sunday of March to the last Sunday of October, 01:00 UTC */
+static int eu_cest(int64_t utc_min)
+{
+    int64_t t = utc_min + days_from_civil(2000, 1, 1) * 1440;      /* minutes since 1970 */
+    int y, mo, d;
+    civil_from_days(t / 1440, &y, &mo, &d);
+    int64_t mar = days_from_civil(y, 3, 31), oct = days_from_civil(y, 10, 31);
+    mar -= (mar + 4) % 7; oct -= (oct + 4) % 7;                   /* back to Sunday (1970-01-01 = Thursday) */
+    return t >= mar * 1440 + 60 && t < oct * 1440 + 60;
+}
+
 static void put_bcd(uint8_t *x, int from, int n, int v)
 {
     static const int w[8] = { 1, 2, 4, 8, 10, 20, 40, 80 };
@@ -168,7 +180,7 @@ static void decode(dcfbits_t *b, uint64_t n_end)
         float sc[5]; uint8_t y[59]; int d;
         float zz[59];
         for (k = 0; k < 59; k++) zz[k] = b->z_am[k] + b->z_pm[k];
-        for (d = -2; d <= 2; d++) { encode(te + d, b->ref_cest, y); sc[d + 2] = fit(zz, y); }
+        for (d = -2; d <= 2; d++) { encode(te + d, eu_cest(te + d), y); sc[d + 2] = fit(zz, y); }
         float other = sc[0];
         for (d = 1; d < 5; d++) if (d != 2 && sc[d] > other) other = sc[d];
         b->pred_score = sc[2]; b->pred_margin = sc[2] - other;
@@ -176,10 +188,10 @@ static void decode(dcfbits_t *b, uint64_t n_end)
             b->status = DCFT_CONFIRMED; b->n_decoded++; b->n_confirmed++;
             b->ref_utc_min = te; b->ref_n_end = n_end;
         } else if (sc[2] > DCFB_PRED_MIN && b->pred_margin > DCFB_PRED_MARGIN) {
-            int64_t days = (te + (b->ref_cest ? 120 : 60)) / 1440;   /* fill the fields from te */
-            int64_t lm = te + (b->ref_cest ? 120 : 60);
+            b->cest = eu_cest(te);                            /* fill the fields from te */
+            int64_t lm = te + (b->cest ? 120 : 60), days = lm / 1440;
             civil_from_days(days + days_from_civil(2000, 1, 1), &b->year, &b->month, &b->day);
-            b->hour = (int)(lm % 1440) / 60; b->minute = (int)(lm % 1440) % 60; b->cest = b->ref_cest;
+            b->hour = (int)(lm % 1440) / 60; b->minute = (int)(lm % 1440) % 60;
             b->utc_min = te;
             b->status = DCFT_PREDICTED; b->n_predicted++;
             b->ref_utc_min = te; b->ref_n_end = n_end;
@@ -197,7 +209,7 @@ static void decode(dcfbits_t *b, uint64_t n_end)
     if (b->have_last && on_grid(n_end, b->last_n_end, &el)) {
         if (b->utc_min == b->last_utc_min + el) {
             b->status = DCFT_CONFIRMED; b->n_confirmed++;
-            b->have_ref = 1; b->ref_utc_min = b->utc_min; b->ref_n_end = n_end; b->ref_cest = b->cest;
+            b->have_ref = 1; b->ref_utc_min = b->utc_min; b->ref_n_end = n_end;
         }
     }
     b->last_utc_min = b->utc_min; b->last_n_end = n_end; b->have_last = 1;

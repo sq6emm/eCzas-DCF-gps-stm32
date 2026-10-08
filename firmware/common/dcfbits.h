@@ -51,7 +51,7 @@ typedef struct {
     uint64_t n_end;                       /* sample count at the end of second 58 of the decoded minute */
     /* confirmation */
     int64_t last_utc_min; uint64_t last_n_end; int have_last;   /* last standalone decode */
-    int64_t ref_utc_min; uint64_t ref_n_end; int have_ref, ref_cest; /* last confirmed minute */
+    int64_t ref_utc_min; uint64_t ref_n_end; int have_ref; /* last confirmed minute */
     float pred_score, pred_margin;        /* expected-frame fit of the last minute and its lead */
     unsigned long n_predicted;
     unsigned long n_decoded, n_confirmed, n_failed;
