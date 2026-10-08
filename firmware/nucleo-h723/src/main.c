@@ -45,8 +45,12 @@
 #endif
 
 #define FS_NOM_HZ    1000000.0
-#ifndef FS_GUESS_HZ
-#define FS_GUESS_HZ  1009590.0            /* measured from the carrier on 27 Sep 2026 */
+#ifndef FS_GUESS_HZ                       /* ADC rate before the reference is measured (fallback without one) */
+#ifdef USE_HSI
+#define FS_GUESS_HZ  1006300.0            /* HSI: the timer clock ran +6100..+6500 ppm (Oct 2026) */
+#else
+#define FS_GUESS_HZ  1009590.0            /* ST-LINK MCO, measured from the carrier on 27 Sep 2026 */
+#endif
 #endif
 #define BLOCK        5000                 /* ADC samples per DMA half: 5 ms */
 #define DECIM        100                  /* 1 Msps -> 10 kHz */
@@ -136,12 +140,15 @@ static void date_str(char *b, uint32_t sec, int8_t tz)
 }
 
 /* ---------------------------------------------------------------- hardware (as the probe) */
+static int clock_err;                     /* HAL errors in clock_init (bits: 1 PLL1, 2 bus clocks, 4 PLL2), reported at start */
 static void clock_init(void)
 {
     RCC_OscInitTypeDef o = {0};
     RCC_ClkInitTypeDef c = {0};
     HAL_PWREx_ConfigSupply(PWR_LDO_SUPPLY);
-    __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
+    /* VOS0: SYSCLK is ~402.5 MHz (HSI +0.63 %), above VOS1's 400 MHz, and AXI ~201 MHz needs VOS0 for
+       2 flash wait states (RM0468) */
+    __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE0);
     while (!__HAL_PWR_GET_FLAG(PWR_FLAG_VOSRDY)) {}
 #ifdef USE_HSI
     o.OscillatorType = RCC_OSCILLATORTYPE_NONE;      /* skip HSE: fall through to HSI below */
@@ -162,7 +169,7 @@ static void clock_init(void)
         o.PLL.PLLState = RCC_PLL_ON; o.PLL.PLLSource = RCC_PLLSOURCE_HSI;
         o.PLL.PLLM = 4; o.PLL.PLLN = 50; o.PLL.PLLP = 2; o.PLL.PLLQ = 4; o.PLL.PLLR = 2;   /* 16 MHz -> 800 -> 400 */
         o.PLL.PLLRGE = RCC_PLL1VCIRANGE_3; o.PLL.PLLVCOSEL = RCC_PLL1VCOWIDE; o.PLL.PLLFRACN = 0;
-        HAL_RCC_OscConfig(&o);
+        if (HAL_RCC_OscConfig(&o) != HAL_OK) clock_err |= 1;
     }
     c.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2 |
                   RCC_CLOCKTYPE_D3PCLK1 | RCC_CLOCKTYPE_D1PCLK1;
@@ -170,18 +177,19 @@ static void clock_init(void)
     c.AHBCLKDivider = RCC_HCLK_DIV2;
     c.APB3CLKDivider = RCC_APB3_DIV2; c.APB1CLKDivider = RCC_APB1_DIV2;
     c.APB2CLKDivider = RCC_APB2_DIV2; c.APB4CLKDivider = RCC_APB4_DIV2;
-    HAL_RCC_ClockConfig(&c, FLASH_LATENCY_2);
+    if (HAL_RCC_ClockConfig(&c, FLASH_LATENCY_2) != HAL_OK) clock_err |= 2;
     RCC_PeriphCLKInitTypeDef p = {0};
     p.PeriphClockSelection = RCC_PERIPHCLK_ADC;
+    /* ADC clock 36 MHz: VCO 288 MHz / 8 (the VCO was 144 MHz, below the medium range's 150 MHz) */
 #ifdef USE_HSI
-    p.PLL2.PLL2M = 4; p.PLL2.PLL2N = 9;
+    p.PLL2.PLL2M = 4; p.PLL2.PLL2N = 18;      /* 64 / 4 = 16 MHz */
 #else
-    p.PLL2.PLL2M = 1; p.PLL2.PLL2N = 18;
+    p.PLL2.PLL2M = 1; p.PLL2.PLL2N = 36;      /* 8 MHz */
 #endif
-    p.PLL2.PLL2P = 4; p.PLL2.PLL2Q = 2; p.PLL2.PLL2R = 2;
+    p.PLL2.PLL2P = 8; p.PLL2.PLL2Q = 2; p.PLL2.PLL2R = 2;
     p.PLL2.PLL2RGE = RCC_PLL2VCIRANGE_3; p.PLL2.PLL2VCOSEL = RCC_PLL2VCOMEDIUM; p.PLL2.PLL2FRACN = 0;
     p.AdcClockSelection = RCC_ADCCLKSOURCE_PLL2;
-    HAL_RCCEx_PeriphCLKConfig(&p);
+    if (HAL_RCCEx_PeriphCLKConfig(&p) != HAL_OK) clock_err |= 4;
 }
 
 static void gpio_uart_init(void)
@@ -477,11 +485,12 @@ static float mix_c = 1, mix_s = 0, rot_c, rot_s;
 #endif
 static float mx2_c = 1, mx2_s = 0, rt2_c = 1, rt2_s = 0, acc2_r, acc2_i;
 static double pl_cyc2;
-static void set_mix(double f)
+static void set_mix(double f)              /* both mixers, until the reference is measured */
 {
     f_mix = f;
-    double w = -2 * M_PI * f / FS_NOM_HZ;
+    double w = -2 * M_PI * f / FS_NOM_HZ, w2 = w * F_DCF / F_CARRIER;
     rot_c = (float)cos(w); rot_s = (float)sin(w);
+    rt2_c = (float)cos(w2); rt2_s = (float)sin(w2);
 }
 /* phase-locked mixer: every ADC sample is exactly 200 timer ticks after the
    previous one, every LSE capture is exactly 8/32768 s after the previous one,
@@ -991,7 +1000,7 @@ int main(void)
         const char *why = r & RCC_RSR_IWDG1RSTF ? "watchdog (main loop stalled)" : r & RCC_RSR_WWDG1RSTF ? "window watchdog" :
                           r & RCC_RSR_LPWRRSTF ? "low-power" : r & RCC_RSR_SFTRSTF ? "software" : r & RCC_RSR_PORRSTF ? "power-on" :
                           r & RCC_RSR_BORRSTF ? "brown-out" : r & RCC_RSR_PINRSTF ? "reset pin" : "unknown";
-        snprintf(m, sizeof m, "reset: %s\r\n", why);
+        snprintf(m, sizeof m, "reset: %s%s\r\n", why, clock_err ? " | CLOCK SETUP FAILED (HAL error)" : "");
         uart_puts(m);
         if (fault_rec[0] == 0xFA017ED0 && fault_rec[1] < 6) {
             snprintf(m, sizeof m, "reset after a %s at PC 0x%08lx\r\n", FN[fault_rec[1]], (unsigned long)fault_rec[2]);
