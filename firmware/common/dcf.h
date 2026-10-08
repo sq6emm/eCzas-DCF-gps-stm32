@@ -43,14 +43,16 @@ typedef struct {
     /* input bookkeeping */
     uint64_t n;                         /* samples seen */
     float    amp;                       /* running carrier amplitude (in-phase mean, ~20 s) */
-    float    amp_ref;                   /* its reference level: follows a rise in ~20 s, a fall over ~1 h */
-    uint32_t amp_n;                     /* valid samples since the start (amp is a plain mean until 20 s) */
+    double   amp_ref;                   /* its reference level: follows a rise in ~20 s, a fall over ~1 h
+                                           (double: a float dropped the 1/7.2e6 steps and never fell) */
+    uint32_t amp_n;                     /* valid samples since the start, saturated at 40000 (plain mean until 20 s) */
     int      amp_low;                   /* this sample: not valid, or amp < DCF_AMP_MIN * amp_ref - not used */
-    uint32_t good_run;                  /* consecutive usable samples (a dip / phase-code window needs all) */
+    uint32_t good_run;                  /* consecutive usable samples, saturated (a dip / phase-code window needs all) */
     /* second-mark fold (this block) and running */
     float    yf[DCF_SPS];
     float    yr[DCF_SPS];
-    float    nval;                      /* usable samples in this block's fold (yf holds i / amp) */
+    float    nval;                      /* usable samples in this block */
+    float    usable;                    /* usable fraction of the last block (0..1) */
     /* per second-of-minute dip depth, running */
     float    dip[60], dipn[60];
     float    sec_y0, sec_y1; int sec_k0, sec_k1;   /* current second's dip / level sums */

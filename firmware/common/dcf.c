@@ -55,9 +55,9 @@ void dcf_init(dcf_t *d)
 
 void dcf_restart(dcf_t *d)
 {
-    uint64_t n = d->n, stage_n = d->stage_n; int stage = d->stage;
+    uint64_t n = d->n;
     memset(d, 0, sizeof *d);
-    d->n = n; d->stage = stage; d->stage_n = stage_n;
+    d->n = n;                           /* (stage 0: a block being evaluated is dropped) */
     d->minute_s = -1;
     d->pm_ref = -1;
 }
@@ -97,20 +97,24 @@ void dcf_push(dcf_t *d, float i, float q, int valid)
     uint64_t n = d->n++;
     int k = (int)(n % DCF_SPS);
     if (valid) {
-        d->amp_n++;
-        d->amp += (i - d->amp) / (float)(d->amp_n < 40000 ? d->amp_n : 40000);   /* mean, then ~20 s */
+        if (d->amp_n < 40000) d->amp_n++;
+        d->amp += (i - d->amp) / (float)d->amp_n;                /* mean, then ~20 s */
         if (d->amp_n >= 2000)
-            d->amp_ref += (d->amp - d->amp_ref) * (d->amp > d->amp_ref ? 1.0f / 40000 : 1.0f / 7200000);
+            d->amp_ref += (d->amp - d->amp_ref) * (d->amp > d->amp_ref ? 1.0 / 40000 : 1.0 / 7200000);
     }
-    /* usable: tracking, the amplitude settled (1 s) and not faded below DCF_AMP_MIN of its reference */
-    d->amp_low = !valid || d->amp_n < 2000 || d->amp <= 0 || d->amp < DCF_AMP_MIN * d->amp_ref;
-    d->good_run = d->amp_low ? 0 : d->good_run + 1;
+    /* usable: tracking, the amplitude settled (1 s) and not faded below DCF_AMP_MIN of its reference
+       (written so that a NaN counts as not usable) */
+    d->amp_low = !valid || d->amp_n < 2000 || !(d->amp > 0) || !(d->amp >= DCF_AMP_MIN * d->amp_ref);
+    if (d->amp_low) d->good_run = 0;
+    else if (d->good_run < 2 * WIN) d->good_run++;
     qring[n & (QRING - 1)] = q;
     if (d->amp_low) {                                    /* the current second's dip is incomplete */
         d->sec_y0 = d->sec_y1 = 0; d->sec_k0 = d->sec_k1 = 0;
         return;
     }
-    d->yf[k] += i / d->amp; d->nval += 1;
+    /* weighted by the amplitude (maximum-ratio combining of i / amp): a weak stretch, or a block with
+       few usable samples, counts for little - the mark search does not depend on the scale */
+    d->yf[k] += i * d->amp; d->nval += 1;
 
     if (!d->have_mark) return;
     {
@@ -135,7 +139,7 @@ void dcf_push(dcf_t *d, float i, float q, int valid)
             float sg = sm <= 9 ? -1.0f : sm <= 14 ? 1.0f : 0.0f;
             if (sg != 0) {
                 uint64_t start = n + 1 - WIN;            /* window = second start - LAGW .. end + LAGW */
-                for (j = 0; j < WIN; j++) d->pmf[j] += sg * qring[(start + j) & (QRING - 1)] / d->amp;
+                for (j = 0; j < WIN; j++) d->pmf[j] += sg * qring[(start + j) & (QRING - 1)] * d->amp;
                 d->pmn += 1;
             }
         }
@@ -206,11 +210,9 @@ static int mark_find(markbuf_t *mb, const float *yr, float *sigma)
 
 int dcf_quick_mark(dcf_t *d, float min_sigma)
 {
-    static float t[DCF_SPS];
-    float s; int k, best;
+    float s; int best;
     if (d->have_mark || d->nval < 60.0f * DCF_SPS) return 0;
-    for (k = 0; k < DCF_SPS; k++) t[k] = d->yf[k] * DCF_SPS / d->nval;
-    best = mark_find(&mb_quick, t, &s);
+    best = mark_find(&mb_quick, d->yf, &s);
     if (s < min_sigma) return 0;
     d->mark = best; d->mark_frac = mark_frac_last; d->mark_sigma = s; d->have_mark = 1;
     return 1;
@@ -319,10 +321,9 @@ static void block_update(dcf_t *d, float carrier_hz)
             d->slip -= sh;
         }
     }
-    /* yf holds i / amp per usable sample: the mean per second-sample; a block without (enough)
-       usable samples only decays the running fold */
-    if (d->nval >= DCF_SPS)
-        for (k = 0; k < DCF_SPS; k++) d->yr[k] = DCF_KEEP * d->yr[k] + d->yf[k] * DCF_SPS / d->nval;
+    /* yf is weighted (dcf_push): a block adds what it has, an empty one only decays the fold */
+    for (k = 0; k < DCF_SPS; k++) d->yr[k] = DCF_KEEP * d->yr[k] + d->yf[k];
+    d->usable = d->nval / ((float)DCF_SPS * DCF_BLOCK_S);
     memset(d->yf, 0, sizeof d->yf); d->nval = 0;
 }
 

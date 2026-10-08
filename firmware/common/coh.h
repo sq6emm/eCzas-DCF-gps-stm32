@@ -75,9 +75,11 @@ int  coh_push(coh_trk_t *t, float re, float im, float *dr, float *di, float *ir,
 void coh_report(coh_trk_t *t, coh_report_t *r);   /* and start a new period */
 /* eCzas: the '0' level measured by the frame decoder on a decoded frame [cycles, < 0] */
 void coh_level_hint(coh_trk_t *t, float lvl0_cycles);
-/* The line being tracked is not the wanted carrier (e.g. DCF77: no second marks): never
+/* The line being tracked is not the wanted carrier (e.g. DCF77: no second marks): do not
  * pick it again (+-width) and search anew. */
 void coh_reject(coh_trk_t *t, float width_hz);
+/* allow the oldest rejected line again (the caller times the rejections) */
+void coh_forget_oldest(coh_trk_t *t);
 /* Skip the search: pull in at `hz` straight away (the carrier's frequency is already known,
  * e.g. DCF77 at ~0 Hz when the time base is a disciplined OCXO). */
 void coh_pull_at(coh_trk_t *t, float hz);

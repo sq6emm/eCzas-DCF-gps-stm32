@@ -186,6 +186,11 @@ void coh_level_hint(coh_trk_t *t, float lvl0)
     if (lvl0 > -60.0f / 360 && lvl0 < -20.0f / 360) t->lvl0 += (lvl0 - t->lvl0) * 0.5f;
 }
 
+void coh_forget_oldest(coh_trk_t *t)
+{
+    if (t->n_excl > 0) { memmove(t->excl, t->excl + 1, (size_t)(t->n_excl - 1) * sizeof(float)); t->n_excl--; }
+}
+
 void coh_reject(coh_trk_t *t, float width_hz)
 {
     (void)width_hz;
