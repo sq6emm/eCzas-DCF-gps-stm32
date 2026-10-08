@@ -24,7 +24,8 @@
  *  WAIT  3 minutes on one source -> y0 (mean of the last 2)
  *  CAL   ramp half the way (nominal slope) or >= EFC_CAL_MIN codes, settle 1 min, measure 2 min
  *        -> y1; slope = (y0 - y1) / step. Wrong sign or 0.2..5 x the nominal size is accepted
- *        (and reported); anything else = EFC not responding -> back to the start code, FAIL.
+ *        (and reported); anything else = EFC not responding -> back to the start code, FAIL
+        (calibration tried again after EFC_FAIL_RETRY minutes).
  *  LOCK  second-order PLL on the carrier phase (time error x = integral of y), time constant
  *        EFC_TAU, damping 0.7; minutes with |y| > EFC_OUTLIER are skipped, 5 in a row -> WAIT.
  */
@@ -55,6 +56,7 @@ typedef struct {
     double dg10, eg10, bdg, beg;  /* 10-min sums of station - GPS; the stations' offsets learned against GPS */
     int    n10g, nd10, ne10, nbg;
     double gxr_prev, gyr_prev, c_min;   /* raw GPS phase / frequency of the last minute, code then */
+    double dy_prev;                /* frequency change the loop commanded in the last minute */
     int    gxr_ok, gyr_ok;
     int    gjump_ext;             /* set by the caller before efc_minute3: a GPS phase jump seen pulse by pulse */
 } efc_t;

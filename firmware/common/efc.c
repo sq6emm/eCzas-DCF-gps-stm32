@@ -80,6 +80,9 @@
 #ifndef EFC_GPS_HOLD_F
 #define EFC_GPS_HOLD_F 30          /* minutes suspended after a frequency disagreement */
 #endif
+#ifndef EFC_FAIL_RETRY
+#define EFC_FAIL_RETRY 60          /* minutes in FAIL before the calibration is tried again */
+#endif
 #define EFC_MAX 4095.0
 
 static double clampc(double c) { return c < 0 ? 0 : c > EFC_MAX ? EFC_MAX : c; }
@@ -96,7 +99,7 @@ void efc_init(efc_t *f, double code, double slope)
     f->r10sum = f->r10prev = f->v10 = 0; f->r10n = f->r10gap = 0; f->h10 = 0;
     f->gx_off = f->gx = 0; f->vg = 0; f->pyg = 0;
     f->gsus = 0; f->gsus_why = 0; f->n10g = f->nd10 = f->ne10 = 0; f->dg10 = f->eg10 = f->bdg = f->beg = 0; f->nbg = 0;
-    f->gxr_prev = f->gyr_prev = 0; f->gxr_ok = f->gyr_ok = 0; f->c_min = f->c; f->gsus_age = 0; f->gjump_ext = 0;
+    f->gxr_prev = f->gyr_prev = 0; f->gxr_ok = f->gyr_ok = 0; f->c_min = f->c; f->gsus_age = 0; f->gjump_ext = 0; f->dy_prev = 0;
     if (slope != 0) { f->slope = slope; f->state = EFC_LOCK; f->skip = 0; }
 }
 
@@ -177,9 +180,12 @@ int efc_minute3(efc_t *f, int vg, double xg, int vd, double yd, int ve, double y
             have_prev = 0;
         }
         f->gjump_ext = 0;
+        /* the code change of a minute shows half in that minute's mean phase step and half in the next */
+        double dy_cmd = -f->slope * (f->c - f->c_min);                 /* code up -> OCXO faster -> y down */
+        double dy_pred = 0.5 * (dy_cmd + f->dy_prev);
+        f->dy_prev = dy_cmd;
         if (have_prev && f->gyr_ok && f->state == EFC_LOCK) {
-            double dy_cmd = -f->slope * (f->c - f->c_min);             /* code up -> OCXO faster -> y down */
-            if (fabs((ygr - (f->gyr_prev + dy_cmd)) * T) > EFC_GPS_JUMP) {
+            if (fabs((ygr - (f->gyr_prev + dy_pred)) * T) > EFC_GPS_JUMP) {
                 if (f->gsus < EFC_GPS_HOLD_J) f->gsus = EFC_GPS_HOLD_J;
                 f->gsus_why = 1; f->n10g = f->nd10 = f->ne10 = 0; f->dg10 = f->eg10 = 0;
                 have_prev = 0;                                           /* this minute is not used below */
@@ -221,10 +227,13 @@ int efc_minute3(efc_t *f, int vg, double xg, int vd, double yd, int ve, double y
     f->gsus_age = 0;
     if (!vg) { efc_minute(f, src, y, T); return src; }
     /* the GPS PPS steers: xg = the measured phase (OCXO second behind the GPS second, > 0) with an arbitrary
-       constant; when the GPS (re)takes over, that constant is set so the loop's phase continues smoothly */
+       constant; when the GPS (re)takes over, that constant is set so the loop's phase continues smoothly.
+       Outside LOCK the offset is re-taken every minute, so WAIT / CAL get the raw frequency of the minute
+       (the phase difference from the offset was 0 there: every calibration with the GPS ended in FAIL) */
+    if (f->state != EFC_LOCK && !f->gyr_ok) { efc_minute(f, EFC_SRC_NONE, 0, T); return EFC_SRC_NONE; }
     if (f->src != EFC_SRC_GPS || f->state != EFC_LOCK) f->gx_off = f->x - xg;
     double x = xg + f->gx_off;
-    double yg = (x - f->x) / T;                       /* frequency of this minute (for the log / WAIT / CAL) */
+    double yg = f->state == EFC_LOCK ? (x - f->x) / T : f->gyr_prev;   /* frequency of this minute */
     if (f->src == EFC_SRC_GPS) { double d = yg - f->pyg; f->vg += (0.5 * d * d - f->vg) / EFC_NOISE_N; }
     f->pyg = yg; f->gx = x;
     f->we = 0; f->veff = f->vg;
@@ -278,7 +287,7 @@ void efc_minute(efc_t *f, int src, double y, double T)
             } else {
                 f->slope = s;
                 f->target = f->c0;
-                f->state = EFC_FAIL;
+                f->state = EFC_FAIL; f->n = 0;
             }
         }
         break;
@@ -290,6 +299,8 @@ void efc_minute(efc_t *f, int src, double y, double T)
             break;
         }
         if (fabs(y) > EFC_OUTLIER) {
+            if (src == EFC_SRC_GPS) f->x = f->gx;     /* the GPS phase stays measured: the next minute's y
+                                                         is that minute's own, not this outlier again */
             if (++f->outliers >= 5) to_wait(f);
             break;
         }
@@ -318,8 +329,9 @@ void efc_minute(efc_t *f, int src, double y, double T)
             f->target = clampc(f->cref + (kp * f->x + f->integ) / f->slope);
         }
         break;
-    case EFC_FAIL:
+    case EFC_FAIL:                                    /* EFC not responding: try again after a while */
         f->src = src;
+        if (++f->n >= EFC_FAIL_RETRY) to_wait(f);
         break;
     }
 }

@@ -3,7 +3,8 @@
  *     mode 0: GPS all the time; 1: GPS with a 6 h outage (DCF77 / e-CzasPL take over) in the middle;
  *          2: DCF77 only (the loop before the GPS lock, for comparison); 3: cold start 20 ppb off, GPS;
  *          4: spoofed GPS phase STEP of 550 ns at mid-run (+ offset s into the minute: review 3 found a
- *          mid-minute step undetected by the minute-mean check); 5: spoofed GPS FREQUENCY +20 ppb from mid-run
+ *          mid-minute step undetected by the minute-mean check); 5: spoofed GPS FREQUENCY +20 ppb from mid-run;
+ *          6: as 0, but the EFC slope calibrated at the start (efc_init slope 0) - must end locked, not FAILED
  * OCXO: y_free = offset + random-walk FM + ageing + daily temperature swing; y = y_free - slope (code - c0)
  * (> 0: slow, as in efc.c); the DAC is dithered by efc_tick as on the board. GPS PPS: jitter 20 ns rms on the
  * pulse phase (NEO-7P, 1 Oct 2026); the firmware's unwrap / 10 us glitch filter / minute mean are copied.
@@ -29,7 +30,7 @@ int main(int argc, char **argv)
     long toff = argc > 4 ? atol(argv[4]) : 0;
     const double slope = 0.816e-9, c0 = 2252.0;
     long N = (long)(days * 86400);
-    efc_t f; efc_init(&f, c0, slope);
+    efc_t f; efc_init(&f, c0, mode == 6 ? 0 : slope);
     double y0 = (mode == 3 ? 20e-9 : 1.5e-9), rw = 0, tocxo = 0.37, xtrue = 0;   /* OCXO time vs GPS [s] */
     double ph_prev = 0, xun = 0, xsum = 0; int have = 0, n = 0;
     double st_avg = 0; int st_n = 0, jump = 0;                         /* main.c per-pulse jump check */
@@ -74,7 +75,7 @@ int main(int argc, char **argv)
         }
     }
     printf("mode %d (%s), %.1f days, tau_gps %.0f s: time error vs GPS rms %.1f ns max %.1f ns | OCXO ADEV",
-           mode, mode == 0 ? "GPS" : mode == 1 ? "GPS, 6 h outage" : mode == 2 ? "DCF77 only" : mode == 3 ? "GPS, cold start 20 ppb" : mode == 4 ? "GPS, spoofed 550 ns step" : "GPS, spoofed +20 ppb",
+           mode, mode == 0 ? "GPS" : mode == 1 ? "GPS, 6 h outage" : mode == 2 ? "DCF77 only" : mode == 3 ? "GPS, cold start 20 ppb" : mode == 4 ? "GPS, spoofed 550 ns step" : mode == 5 ? "GPS, spoofed +20 ppb" : "GPS, calibrated at start",
            days, f.tau, sqrt(sx2 / nx) * 1e9, xmax * 1e9);
     int taus[] = { 1, 10, 60, 180, 360 };
     for (int k = 0; k < 5; k++) {
@@ -86,6 +87,7 @@ int main(int argc, char **argv)
         }
         printf(" %d min %.1e", m, c ? sqrt(0.5 * s / c) : 0);
     }
-    printf(" | GPS steering %ld min, suspended %ld min (jump %ld, disagreement %ld)\n", ngps, nsus, nj, nf);
+    printf(" | GPS steering %ld min, suspended %ld min (jump %ld, disagreement %ld) | end: %s, slope %.3g\n",
+           ngps, nsus, nj, nf, efc_state_txt(&f), f.slope);
     return 0;
 }
