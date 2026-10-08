@@ -8,6 +8,8 @@
  *     -n SNR    add white noise relative to the input RMS (as sim.c)
  *     -r T0 N0  truth: the frame starting at T0 s is number N0 (wrong times are counted)
  *     -b BW     tracking loop bandwidth [Hz] (default 1)
+ *     -T        also try the expected-frame confirmation on frames whose marker did not decode
+ *               (FR_NOT_TIME); counted apart by slot: :03 always carries a time frame, :33 never
  *   cohsim -c [-n SNR_dB] ... file.c64
  *     file.c64  the NUCLEO's own e-CzasPL dump (2 kHz complex float32 mixer output, ecz_*.c64): fed to
  *               the tracker as it is, the firmware's chain exactly (-n: complex noise relative to |z| rms)
@@ -65,6 +67,7 @@ int main(int argc, char **argv)
     const char *path = NULL; FILE *f; long n = 0, cap = 1 << 20, i; int16_t *x;
     int n_cand = 0, n_ok = 0, n_nottime = 0, n_fail = 0, n_tk[5] = { 0 }, clock_wrong = 0, n_conf = 0, conf_wrong = 0, cr;
     int n_presync = 0, have_last = 0, ever = 0, n_unl = 0; long unl = 0, run = 0, maxrun = 0;
+    int try_nt = 0, nt_conf[3] = { 0 };            /* -T: confirmed FR_NOT_TIME at :03, :33, other slots */
     double sum_err = 0, sum_err2 = 0, first_sync = -1; int n_err = 0; frame_info_t last_fi, sfi;
 
     for (a = 1; a < argc; a++) {
@@ -75,6 +78,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[a], "-b")) bw = atof(argv[++a]);
         else if (!strcmp(argv[a], "-q")) quiet = 1;
         else if (!strcmp(argv[a], "-c")) c64 = 1;
+        else if (!strcmp(argv[a], "-T")) try_nt = 1;
         else path = argv[a];
     }
     if (!path || !(f = fopen(path, "rb"))) { fprintf(stderr, "usage: cohsim [-8] [-n snr] file.raw\n"); return 2; }
@@ -137,7 +141,15 @@ int main(int argc, char **argv)
                 n_conf++;
                 if (!quiet) printf("%9.4f corr=%.2f confirmed\n", tsec, ez.cand.corr_q10 / 1024.0);
                 if (cr == 2) { last_fi = sfi; have_last = 1; if (first_sync < 0) first_sync = tsec; n_presync++; }
-            } else if (st == FR_NOT_TIME) n_nottime++;
+            } else if (st == FR_NOT_TIME) {
+                uint32_t n3s;
+                n_nottime++;
+                if (try_nt && tk.synced && have_last && tk_expected_n3(&tk, base, &n3s) &&
+                    confirm(&ez, &tk, &last_fi, base, ref_t0, ref_n0, tsec, &conf_wrong, &sfi)) {
+                    int s = (int)(3UL * n3s % 60);
+                    nt_conf[s == 3 ? 0 : s == 33 ? 1 : 2]++;
+                }
+            }
             else { n_fail++; if (!quiet) printf("%9.4f corr=%.2f decode failed (%d) snr=%d\n", tsec, ez.cand.corr_q10 / 1024.0, st, fi.snr_db); }
             ez.cand_ready = 0;
         }
@@ -152,6 +164,8 @@ int main(int argc, char **argv)
            snr, n_cand, n_ok, n_nottime, n_fail, n_tk[0], n_tk[1], n_tk[2], n_tk[3], n_tk[4],
            n_err ? sqrt(sum_err2 / n_err - (sum_err / n_err) * (sum_err / n_err)) : 0.0, n_err ? sum_err / n_err : 0.0,
            tk_rate_ppb(&tk), first_sync, clock_wrong, n_conf, conf_wrong, n_presync);
+    if (try_nt) printf("NOT_TIME confirmed: slot :03 %d (time frames recovered), :33 %d (other messages taken for one), other slots %d\n",
+                       nt_conf[0], nt_conf[1], nt_conf[2]);
     free(x); free(zc);
     return 0;
 }

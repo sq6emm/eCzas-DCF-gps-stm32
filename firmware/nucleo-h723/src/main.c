@@ -940,13 +940,18 @@ static void handle_candidate(void)
                  + (int64_t)ECZ_TEMPLATE_LAG_US * (FCY_HZ / 1000000L); /* template lag, see ecz.h */
     memset(&fi, 0, sizeof fi);
     frame_status_t st = frame_decode(c->ph + CAND_PRE, &fi);
-    if (st == FR_NOT_TIME) { ez.cand_ready = 0; return; }
-    n_heard++; hs.heard++;
-    {
+    /* the marker did not decode: another message, or a time frame too damaged to tell - only the
+       expected time frame can confirm it (bench, host/cohsim -T on 6 h of e-CzasPL dumps with noise
+       added: +14 % confirmed frames at the weakest usable level, none in the :33 slot, which never
+       carries a time frame, no wrong time) */
+    int nt = st == FR_NOT_TIME;
+    if (nt && !(tk.synced && have_last_fi)) { ez.cand_ready = 0; return; }
+    if (!nt) {
+        n_heard++; hs.heard++;
         uint32_t n3h;
         if (tk.synced && tk_expected_n3(&tk, tick, &n3h)) hs_mark(n3h, 1);
     }
-    if (st == FR_UNCORRECTABLE && have_last_fi) {
+    if ((st == FR_UNCORRECTABLE || nt) && have_last_fi) {
         uint32_t n3p;
         if (tk_expected_n3(&tk, tick, &n3p)) {
             uint8_t bits[FRAME_BITS];
@@ -956,18 +961,20 @@ static void handle_candidate(void)
             int16_t sc = frame_confirm(c->ph + CAND_PRE, bits, &tq);
             if (sc >= CONFIRM_MIN_Q10) {
                 frame_info_t fe = last_fi; fe.n3 = n3p;
+                if (nt) { n_heard++; hs.heard++; hs_mark(n3p, 1); }
                 tk_result_t r = tk_frame(&tk, tick + (int64_t)tq * TICKS_PER_BLOCK / 32768, &fe);
                 n_conf++;
                 if (r == TK_ACCEPTED) { hs.all_conf++; hs_mark(n3p, 2); }
                 date_str(d1, 3UL * n3p, fe.tz);
-                snprintf(m, sizeof m, "#%lu not decodable, but %d%% agrees with the expected frame: %s%s",
-                         (unsigned long)n_heard, sc * 100 / 1024, d1, r == TK_ACCEPTED ? " - confirmed" : "");
+                snprintf(m, sizeof m, "#%lu not decodable%s, but %d%% agrees with the expected frame: %s%s",
+                         (unsigned long)n_heard, nt ? " (no marker)" : "", sc * 100 / 1024, d1, r == TK_ACCEPTED ? " - confirmed" : "");
                 put_line("FRAME", m);
                 ez.cand_ready = 0;
                 return;
             }
         }
     }
+    if (nt) { ez.cand_ready = 0; return; }
     if (st != FR_OK) {
         if (st == FR_NO_SIGNAL)                /* the levels did not separate: no snr was measured */
             snprintf(m, sizeof m, "#%lu corr %d%% - not decodable (no signal)", (unsigned long)n_heard, c->corr_q10 * 100 / 1024);
