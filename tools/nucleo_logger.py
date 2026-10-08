@@ -40,6 +40,7 @@ def open_wav(now):
 
 
 bad_crc = bad_txt = 0
+bad_last = b""
 t_report = time.time()
 
 
@@ -78,7 +79,7 @@ while True:
                 open_c64(typ, utc())
             files[typ][0].write(buf[i + 6:i + PK2 - 2]); files[typ][0].flush()
             if line:                                 # packets and text lines are sent whole: what is
-                bad_txt += 1; line = b""             # pending here is the rest of a broken packet
+                bad_txt += 1; bad_last = line[:24]; line = b""   # pending here is the rest of a broken packet
             files[typ][1].write(f"{n0},{now_t:.3f}\n")
             i += PK2
             continue
@@ -102,7 +103,7 @@ while True:
         i += 1
         if c == b"\n":
             if any(b > 0x7E or (b < 0x20 and b != 9) for b in line):
-                bad_txt += 1                         # the remains of a broken packet, not a line
+                bad_txt += 1; bad_last = line[:24]   # the remains of a broken packet, not a line
             else:
                 txt = line.decode().strip()
                 if txt:
@@ -115,5 +116,5 @@ while True:
     buf = buf[i:]
     if time.time() - t_report >= 600:
         if bad_crc or bad_txt:
-            log.write(f"{utc().isoformat(timespec='milliseconds')} LOGGER last 10 min: {bad_crc} packet starts with a bad CRC, {bad_txt} binary lines dropped\n")
+            log.write(f"{utc().isoformat(timespec='milliseconds')} LOGGER last 10 min: {bad_crc} packet starts with a bad CRC, {bad_txt} binary lines dropped (last starts {bad_last!r})\n")
         bad_crc = bad_txt = 0; t_report = time.time()
