@@ -134,7 +134,9 @@ void dcf_push(dcf_t *d, float i, float q, int valid)
            steps with the drift correction, which smeared the fold by 0.5-1 ms) */
         int pr = d->pm_ref >= 0 ? (int)((n + DCF_SPS - d->pm_ref) % DCF_SPS) : -1;
         if (pr == DCF_LAGW - 1 && d->have_minute && d->good_run >= WIN && n >= (uint64_t)(WIN + DCF_SPS)) {
-            uint64_t sd = (n - d->pm_ref) / DCF_SPS - 1; /* the second just completed */
+            /* the second just completed, counted from the mark like the dips and the minute (pm_ref is
+               within a few ms of the mark, but may sit on the other side of 0/1999: one second off) */
+            uint64_t sd = (n + 1 - DCF_LAGW - DCF_SPS / 2 - d->mark) / DCF_SPS;
             int sm = (int)((sd + 60 - (uint64_t)d->minute_s - 1) % 60), j;
             float sg = sm <= 9 ? -1.0f : sm <= 14 ? 1.0f : 0.0f;
             if (sg != 0) {
@@ -223,6 +225,27 @@ int dcf_block_ready(const dcf_t *d)
     return d->n > 0 && d->n % ((uint64_t)DCF_SPS * DCF_BLOCK_S) == 0;
 }
 
+/* the mark moves by sh samples (the short way): a mark crossing 0/1999 changes (n - mark) / DCF_SPS
+   by one, which put every second one slot off (dips, minute, time-code bits) for ~50 min - keep the
+   per-second dips and the minute on the same seconds */
+static void move_mark(dcf_t *d, int sh)
+{
+    int m = d->mark + sh, delta = m >= DCF_SPS ? 1 : m < 0 ? -1 : 0, c;
+    d->mark = (m + DCF_SPS) % DCF_SPS;
+    if (!delta) return;
+    float t[60], u[60];
+    for (c = 0; c < 60; c++) { t[(c + delta + 60) % 60] = d->dip[c]; u[(c + delta + 60) % 60] = d->dipn[c]; }
+    memcpy(d->dip, t, sizeof t); memcpy(d->dipn, u, sizeof u);
+    if (d->minute_s >= 0) d->minute_s = (d->minute_s + delta + 60) % 60;
+}
+
+/* the phase-code fold starts again: its time is no longer valid either */
+static void pm_restart(dcf_t *d)
+{
+    memset(d->pmf, 0, sizeof d->pmf); d->pmn = 0;
+    d->pm_sigma = 0; d->pm_lag_ms = 0; d->pm_block_done = 0;
+}
+
 /* minute marker from the running per-second dip depths (no decay here) */
 static void minute_eval(dcf_t *d, float min_sigma)
 {
@@ -236,7 +259,7 @@ static void minute_eval(dcf_t *d, float min_sigma)
             sg = robust_sigma(v, 60, lo, lo, &med);
             d->minute_sigma = (med - v[lo]) / sg;
             if (d->minute_sigma > min_sigma) {
-                if (d->have_minute && d->minute_s != lo) { memset(d->pmf, 0, sizeof d->pmf); d->pmn = 0; }
+                if (d->have_minute && d->minute_s != lo) pm_restart(d);
                 if (d->pm_ref < 0) d->pm_ref = d->mark;
                 d->minute_s = lo; d->have_minute = 1;
             }
@@ -316,7 +339,7 @@ static void block_update(dcf_t *d, float carrier_hz)
             static float t[DCF_SPS];
             for (k = 0; k < DCF_SPS; k++) t[(k + sh + DCF_SPS) % DCF_SPS] = d->yr[k];
             memcpy(d->yr, t, sizeof t);
-            if (d->have_mark) d->mark = (d->mark + sh + DCF_SPS) % DCF_SPS;
+            if (d->have_mark) move_mark(d, sh);
             if (d->pm_ref >= 0) d->pm_ref = (d->pm_ref + sh + DCF_SPS) % DCF_SPS;
             d->slip -= sh;
         }
@@ -331,12 +354,14 @@ static void block_update(dcf_t *d, float carrier_hz)
 static void block_mark(dcf_t *d, int best)
 {
     if (d->mark_sigma > DCF_MARK_MIN) {
-        if (d->have_mark && abs(best - d->mark) > 20 && abs(best - d->mark) < DCF_SPS - 20) {
-            memset(d->pmf, 0, sizeof d->pmf); d->pmn = 0;       /* the mark moved: restart the fold */
+        int sh = (best - d->mark + DCF_SPS + DCF_SPS / 2) % DCF_SPS - DCF_SPS / 2;   /* -1000 .. 999 */
+        if (!d->have_mark) d->mark = best;
+        else if (sh > 20 || sh < -20) {                  /* the mark moved: restart the folds */
+            pm_restart(d);
             memset(d->dip, 0, sizeof d->dip); memset(d->dipn, 0, sizeof d->dipn);
-            d->have_minute = 0; d->pm_ref = -1;
-        }
-        d->mark = best; d->mark_frac = mark_frac_last; d->have_mark = 1;
+            d->have_minute = 0; d->pm_ref = -1; d->mark = best;
+        } else move_mark(d, sh);
+        d->mark_frac = mark_frac_last; d->have_mark = 1;
     }
 }
 
