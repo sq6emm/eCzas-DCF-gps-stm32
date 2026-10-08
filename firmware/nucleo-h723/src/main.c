@@ -336,6 +336,7 @@ static volatile uint64_t cap_tick[CAPR];
    so the pulse lands on the samples' own time base (5 ns steps). Nothing connected = no captures. */
 static volatile uint64_t pps_tick; static volatile uint32_t pps_seq;
 static double pps_tt; static int pps_new;   /* the last pulse in true time (capture units), not yet reported */
+static double pps_t_prev;                  /* the pulse before it (0: none) */
 #ifndef EFC_USE_GPS
 #define EFC_USE_GPS 1                          /* 1: the GPS PPS steers the OCXO when present (phase lock) */
 #endif
@@ -528,14 +529,21 @@ static void pl_calibrate(void)
     int64_t tick_now = (int64_t)lt + ((n16 - ll) & 0xFFFF);
     pl_c = tick_now - 200 * (int64_t)written - (int64_t)c6;
 }
-static double true_time(int64_t tick)      /* capture units, from the ring */
+/* true_time() counts captures from tt_epoch, moved forward by whole seconds every ~12 days (tt_rebase)
+   with every stored true time: a double holding the capture count since the start lost resolution
+   (~4 ns after a year, ~30 ns after ten - the GPS PPS phase) */
+static uint64_t tt_epoch;
+#ifndef TT_REBASE_CAPS
+#define TT_REBASE_CAPS (1ULL << 32)        /* (a test build may set it lower, but above 70 s of captures) */
+#endif
+static double true_time(int64_t tick)      /* capture units since tt_epoch, from the ring */
 {
     __disable_irq(); uint64_t J = lse_tot_caps; __enable_irq();
     uint64_t j = J;
     while (j > 0 && J - j < CAPR - 4 && (int64_t)cap_tick[j % CAPR] > tick) j--;
     if (j == J) j = J - 1;                 /* past the newest capture: extrapolate */
     int64_t a = (int64_t)cap_tick[j % CAPR], b = (int64_t)cap_tick[(j + 1) % CAPR];
-    return (double)j + (double)(tick - a) / (double)(b - a);
+    return (double)(int64_t)(j - tt_epoch) + (double)(tick - a) / (double)(b - a);
 }
 /* ---- the two stations: same structure, separate state, no data between them ----
  * mixer (phase-locked to true time, fixed nominal frequency) -> sum over exactly 0.5 ms of
@@ -811,6 +819,22 @@ static void process_block(const uint32_t *b, float mean, float mean2)   /* b NUL
     }
     float m = 1.0f / sqrtf(mix_c * mix_c + mix_s * mix_s);
     mix_c *= m; mix_s *= m;
+}
+
+/* move tt_epoch forward (whole seconds, so the phase within the second is kept) and every stored
+   true time with it; between blocks, once a second */
+static void tt_rebase(void)
+{
+    __disable_irq(); uint64_t J = lse_tot_caps; __enable_irq();
+    if (J - tt_epoch < TT_REBASE_CAPS) return;
+    const uint64_t cps = (uint64_t)(1.0 / REF_CAP_S + 0.5);     /* captures per second: 4000 / 4096 */
+    uint64_t d = (J - tt_epoch - cps * 60) / cps * cps;          /* keep the last minute positive */
+    double dd = (double)d;
+    tt_epoch += d;
+    pl_t -= dd; pl_t0 -= dd;
+#ifdef OCXO_REF
+    pps_tt -= dd; if (pps_t_prev > 0) pps_t_prev -= dd;
+#endif
 }
 
 /* the mixers' phase and rate for the block that ends at input sample rd, from the true time of the
@@ -1144,18 +1168,18 @@ int main(void)
         {   /* GPS PPS at once (it waited for the next second of the 2 kHz scale: with the pulse 0-5 ms after
                that boundary, 20-30 % of the pulses were overwritten first): OCXO interval error, e-CzasPL
                clock and DCF77 second against the GPS second */
-            static double t_prev; static uint32_t n_pps;
+            static uint32_t n_pps;
             if (pps_new) {
                 pps_new = 0; n_pps++;
                 double tt = pps_tt;                                    /* capture units */
                 double n2 = (double)pl_n0 + (tt - pl_t0) * REF_CAP_S / 0.0005;   /* on the 2 kHz scale */
                 char m[220], b1[16], b2[24], b3[24];
                 const char *fr = "-", *ez_s = "-", *dc_s = "-";
-                if (t_prev > 0) {
-                    double dt = (tt - t_prev) * REF_CAP_S;             /* OCXO seconds between two GPS seconds */
+                if (pps_t_prev > 0) {
+                    double dt = (tt - pps_t_prev) * REF_CAP_S;         /* OCXO seconds between two GPS seconds */
                     if (dt > 0.9 && dt < 1.1) fr = f1(b1, (1.0 - dt) * 1e9, 1);   /* > 0: OCXO slow */
                 }
-                t_prev = tt;
+                pps_t_prev = tt;
                 {   /* phase of this pulse within the OCXO second: unwrapped, glitches (> 10 us step) dropped */
                     double ph = fmod(tt * REF_CAP_S, 1.0);
                     if (gps_have) {
@@ -1203,6 +1227,7 @@ int main(void)
         if (n2k >= next_s) {              /* once a second */
             next_s += 2000;
             blk_ratio_sum = 0; blk_ratio_n = 0;
+            tt_rebase();
             tk_maintain(&tk, now_tick());
 #ifndef OCXO_REF
             {   /* e-CzasPL: a line tracked for 60 min without a single frame is not e-CzasPL (a spur:
