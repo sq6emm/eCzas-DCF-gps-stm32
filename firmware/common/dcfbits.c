@@ -136,7 +136,9 @@ static int check(dcfbits_t *b, const uint8_t *x)
     if (!bcd(x, 36, 6, &dy) || dy < 1 || dy > 31) return 0;
     wd = x[42] | x[43] << 1 | x[44] << 2; if (wd < 1 || wd > 7) return 0;
     if (!bcd(x, 45, 5, &mo) || mo < 1 || mo > 12) return 0;
-    if (!bcd(x, 50, 8, &yr) || yr > 99) return 0;
+    if (!bcd(x, 50, 8, &yr) || yr > 99) return 0;      /* two digits: 2000-2099. (The weekday could tell the
+                                                          century, but a check on it lost correct minutes whose
+                                                          weekday bits alone were wrong - replay 6-8 Oct) */
     b->minute = mi; b->hour = hr; b->day = dy; b->weekday = wd; b->month = mo; b->year = 2000 + yr;
     b->cest = x[17];
     int64_t days = days_from_civil(b->year, mo, dy) - days_from_civil(2000, 1, 1);
