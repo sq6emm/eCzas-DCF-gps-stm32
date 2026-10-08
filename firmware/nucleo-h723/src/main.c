@@ -634,7 +634,7 @@ static void spec_report(void)
         int k0 = (int)(R[r].f0 / df) + 21, k1 = (int)(R[r].f1 / df) - 21;
         for (int k = k0; k <= k1; k++) {
             const float *a = R[r].ch ? spec.acc1 : spec.acc0;
-            if (a[k] < a[k - 1] || a[k] < a[k + 1]) continue;
+            if (a[k] < a[k - 1] || a[k] <= a[k + 1]) continue;     /* a flat top counts once (its last bin) */
             float v[41]; for (int i = 0; i < 41; i++) v[i] = a[k - 20 + i];
             float md = spec_med(v, 41);
             if (a[k] < 31.6f * md) continue;

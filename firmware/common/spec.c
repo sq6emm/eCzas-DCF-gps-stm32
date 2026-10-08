@@ -72,7 +72,8 @@ void spec_add(spec_t *s, const uint32_t *b, float m0, float m1)
 double spec_psd(const spec_t *s, int ch, int k, double fs)
 {
     double p = (ch ? s->acc1[k] : s->acc0[k]) / (s->nblk ? s->nblk : 1);
-    return 2.0 * p / (0.375 * SPEC_N) / fs;                     /* one-sided, LSB^2/Hz */
+    double one = (k == 0 || k == SPEC_N / 2) ? 1.0 : 2.0;        /* one-sided: DC and Nyquist have no mirror */
+    return one * p / (0.375 * SPEC_N) / fs;                     /* LSB^2/Hz */
 }
 double spec_tone(const spec_t *s, int ch, int k)
 {
