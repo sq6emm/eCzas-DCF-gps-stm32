@@ -47,6 +47,7 @@ typedef struct {
     int    timer;                   /* updates in the current state */
     float  acc_re, acc_im; int acc_n;
     float  lvl0;                    /* eCzas '0' level [cycles], negative */
+    int    lvl0_hinted;             /* a decoded frame has set lvl0 (coh_level_hint): learning starts then */
     float  err_avg;                 /* IIR of |phase error| [cycles] */
     float  unlocked_s;              /* seconds with a noisy loop */
     /* search */
