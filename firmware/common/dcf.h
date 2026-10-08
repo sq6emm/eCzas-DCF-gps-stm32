@@ -66,7 +66,7 @@ typedef struct {
     float    mark_frac;                 /* sub-sample part of the mark (-0.5 .. 0.5, parabolic), for reports only */
     int      minute_s;                  /* which LSE second (mod 60) is DCF77 second 59, -1 = unknown */
     float    minute_sigma;
-    float    pm_lag_ms;                 /* phase-code start relative to the second mark + 200 ms */
+    float    pm_lag_ms;                 /* the DCF77 second's start (from the phase code) relative to the mark [ms] */
     float    pm_sigma;
     int      have_mark, have_minute;
     double   slip;                      /* drift of the DCF77 second through the LSE time scale, samples (fraction kept) */

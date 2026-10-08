@@ -11,7 +11,14 @@
 #endif
 #ifndef DCFB_GRID_TOL
 #define DCFB_GRID_TOL    0.5         /* a reference minute counts only while the minute ends stay on its */
-#endif                               /* grid: whole minutes after it, +-0.5 s (+20 ppm of the time since) */
+#endif                               /* grid: whole minutes after it, +-0.5 s (+DCFB_GRID_PPM of the time since) */
+#ifndef DCFB_GRID_PPM
+#ifdef OCXO_REF
+#define DCFB_GRID_PPM    1.0         /* the sample clock is the OCXO: 20 ppm let the grid grow to +-30 s in 17 days */
+#else
+#define DCFB_GRID_PPM    20.0        /* LSE crystal */
+#endif
+#endif
 
 extern uint8_t dcf_prn_bits[512];          /* the PTB sequence, built by dcf_init() */
 
@@ -144,7 +151,7 @@ static int on_grid(uint64_t n_end, uint64_t n0, int64_t *el)
 {
     double dn = (double)(n_end - n0);
     *el = (int64_t)llround(dn / (60.0 * DCF_SPS));
-    return fabs(dn - (double)*el * 60.0 * DCF_SPS) <= (DCFB_GRID_TOL + 20e-6 * dn / DCF_SPS) * DCF_SPS;
+    return fabs(dn - (double)*el * 60.0 * DCF_SPS) <= (DCFB_GRID_TOL + DCFB_GRID_PPM * 1e-6 * dn / DCF_SPS) * DCF_SPS;
 }
 
 static void decode(dcfbits_t *b, uint64_t n_end)
