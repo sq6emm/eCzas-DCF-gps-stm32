@@ -111,6 +111,14 @@ static const char *f3(char *b, double v)     /* 3 decimals (the printf here has 
     sprintf(b, "%s%lu.%03lu", t < 0 ? "-" : "+", (unsigned long)(a / 1000), (unsigned long)(a % 1000));
     return b;
 }
+static const char *u64s(char *b, uint64_t v)   /* decimal (the printf here has no %llu); b[21] */
+{
+    char t[21]; int n = 0;
+    do { t[n++] = (char)('0' + v % 10); v /= 10; } while (v);
+    for (int i = 0; i < n; i++) b[i] = t[n - 1 - i];
+    b[n] = 0;
+    return b;
+}
 static uint64_t n2k;                      /* 2 kHz samples since start: the common time base */
 static void put_line(const char *tag, const char *msg)
 {
@@ -1214,8 +1222,9 @@ int main(void)
                 uint32_t sec, us;
                 if (tk_time(&tk, now_tick(), &sec, &us)) {
                     char t[120];
-                    snprintf(t, sizeof t, "audio sample %lu = eCzas %lu.%06lu (unix), dcf sample %lu",
-                             (unsigned long)n2k, (unsigned long)(sec + 946684800UL), (unsigned long)us, (unsigned long)n2k);
+                    char ns[21];                       /* 64 bit: 32 bits wrapped after 24.9 days */
+                    snprintf(t, sizeof t, "audio sample %s = eCzas %lu.%06lu (unix), dcf sample %s",
+                             u64s(ns, n2k), (unsigned long)(sec + 946684800UL), (unsigned long)us, ns);
                     put_line("TIMEMAP", t);
                 }
             }

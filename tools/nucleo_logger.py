@@ -47,6 +47,7 @@ def open_c64(typ, now):
     files[typ] = [f, ix, time.time()]
 
 
+n0_hi = {}                                   # per stream: (added high part, last raw sample number)
 while True:
     buf += s.read(8192)
     now_t = time.time()
@@ -57,6 +58,12 @@ while True:
                 break
             typ = buf[i + 1]
             n0 = struct.unpack_from("<I", buf, i + 2)[0]
+            # the packet's 32-bit sample number wraps after 24.9 days: unwrap (a reboot starts again)
+            hi, last = n0_hi.get(typ, (0, None))
+            if last is not None and n0 < last:
+                hi = hi + (1 << 32) if last > 0xF0000000 and n0 < 0x10000000 else 0
+            n0_hi[typ] = (hi, n0)
+            n0 += hi
             if typ not in files or time.time() - files[typ][2] >= 600:
                 open_c64(typ, utc())
             files[typ][0].write(buf[i + 6:i + PK2]); files[typ][0].flush()
