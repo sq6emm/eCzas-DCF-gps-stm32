@@ -21,11 +21,12 @@ SECTIONS
   .preinit_array : { PROVIDE_HIDDEN (__preinit_array_start = .); KEEP (*(.preinit_array*)) PROVIDE_HIDDEN (__preinit_array_end = .); } >FLASH
   .init_array : { PROVIDE_HIDDEN (__init_array_start = .); KEEP (*(SORT(.init_array.*))) KEEP (*(.init_array*)) PROVIDE_HIDDEN (__init_array_end = .); } >FLASH
   .fini_array : { PROVIDE_HIDDEN (__fini_array_start = .); KEEP (*(SORT(.fini_array.*))) KEEP (*(.fini_array*)) PROVIDE_HIDDEN (__fini_array_end = .); } >FLASH
+  /* kept over a reset (not zeroed): the fault record and the EFC code. First in RAM_D1, so its address
+     does not move when .data / .bss change size - a new image still finds the record */
+  .noinit (NOLOAD) : { . = ALIGN(4); *(.noinit) *(.noinit*) . = ALIGN(4); } >RAM_D1
   _sidata = LOADADDR(.data);
   .data : { . = ALIGN(4); _sdata = .; *(.data) *(.data*) . = ALIGN(4); _edata = .; } >RAM_D1 AT> FLASH
   .bss : { . = ALIGN(4); _sbss = .; __bss_start__ = _sbss; *(.bss) *(.bss*) *(COMMON) . = ALIGN(4); _ebss = .; __bss_end__ = _ebss; } >RAM_D1
-  /* kept over a reset (not zeroed): the fault record */
-  .noinit (NOLOAD) : { . = ALIGN(4); *(.noinit) *(.noinit*) . = ALIGN(4); } >RAM_D1
   /* CPU-only buffers (not reachable by DMA1/2): the spectrum diagnostic (common/spec.c); not zeroed at boot */
   .dtcm (NOLOAD) : { . = ALIGN(8); _sdtcm = .; *(.dtcm) *(.dtcm*) . = ALIGN(8); _edtcm = .; } >DTCMRAM
   ASSERT(_estack - _edtcm >= 32K, "DTCM: less than 32 KB left for the stack")
