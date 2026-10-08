@@ -157,6 +157,11 @@ static void clock_init(void)
     o.OscillatorType = RCC_OSCILLATORTYPE_NONE;      /* skip HSE: fall through to HSI below */
     if (1) goto use_hsi;
 #endif
+    /* HSE = the ST-LINK's 8 MHz MCO (USE_MCO builds): PLLM 1, PLLN 100 -> VCO 800 MHz. Another HSE (e.g.
+       the 10 MHz OCXO) needs other dividers - with these it would run the VCO at 1000 MHz */
+#if HSE_VALUE != 8000000
+#error "clock_init: the HSE path is set up for 8 MHz"
+#endif
     o.OscillatorType = RCC_OSCILLATORTYPE_HSE;
     o.HSEState = RCC_HSE_BYPASS;
     o.PLL.PLLState = RCC_PLL_ON;
@@ -315,7 +320,8 @@ TIM_HandleTypeDef htim16;
 #define LSE_WIN 4000                     /* captures per measurement: 1 s */
 #endif
 #ifndef EFC_INIT
-#define EFC_INIT 2253                    /* DAC code at start: this OCXO locked at ~2253 (28 Sep) */
+#define EFC_INIT 2248                    /* DAC code at a power-on start (a reset keeps the last locked code):
+                                            this OCXO locked at ~2253 on 28 Sep, median 2248 on 8 Oct */
 #endif
 #ifndef EFC_SLOPE
 #define EFC_SLOPE 0.816e-9               /* measured 28 Sep (ppb per code); 0 = calibrate at start */
@@ -1236,7 +1242,6 @@ int main(void)
         efc_set((uint32_t)efc_tick(&efc, BLOCK / FS_NOM_HZ));   /* ramp + dither, once per block */
 #endif
         if (ez.cand_ready) handle_candidate();
-        { uint32_t dc = DWT->CYCCNT - c0; busy_cyc += dc; if (dc > max_blk_cyc) max_blk_cyc = dc; }
 
         if (n2k >= next_s) {              /* once a second */
             next_s += 2000;
@@ -1383,5 +1388,8 @@ int main(void)
             overruns = 0; busy_cyc = 0; max_lag = 0; max_blk_cyc = 0;
             adc_min1 = adc_min2 = 65535; adc_max1 = adc_max2 = 0;
         }
+        /* cpu % and the longest block over the whole iteration, the once-a-second / per-minute / 10-s
+           work included (they were left out, so a stall there did not show) */
+        { uint32_t dc = DWT->CYCCNT - c0; busy_cyc += dc; if (dc > max_blk_cyc) max_blk_cyc = dc; }
     }
 }
