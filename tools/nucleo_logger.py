@@ -3,12 +3,14 @@
 (AUDIO_DUMP builds) the core's 10 kHz input as 10-minute WAV files plus an index
 of (first sample number, host time) per packet for alignment with other receivers,
 and the 2 kHz complex float32 streams as 10-minute .c64 files + index: A5 5B = DCF77 (dcf_*),
-A5 5C = e-CzasPL (ecz_*, firmware M3 and later)."""
-import datetime, os, serial, struct, sys, time, wave
+A5 5C = e-CzasPL (ecz_*, firmware M3 and later). These packets end with a CRC-16 of index + samples
+(firmware from Oct 2026): a packet that fails it is dropped (bytes lost on the serial link), and so
+are text lines with binary bytes in them; the counts go to rx.log every 10 min."""
+import binascii, datetime, os, serial, struct, sys, time, wave
 
 DEV, BAUD, OUT = sys.argv[1], int(sys.argv[2]), sys.argv[3]
 PK = 2 + 4 + 400
-PK2 = 2 + 4 + 1600
+PK2 = 2 + 4 + 1600 + 2                       # + CRC-16/CCITT-FALSE of index + samples
 streams = {0x5B: "dcf", 0x5C: "ecz"}
 files = {}                                   # type -> [file, idx, t0]
 os.makedirs(OUT, exist_ok=True)
@@ -37,6 +39,10 @@ def open_wav(now):
     wav_t0 = time.time()
 
 
+bad_crc = bad_txt = 0
+t_report = time.time()
+
+
 def open_c64(typ, now):
     if typ in files:
         files[typ][0].close(); files[typ][1].close()
@@ -57,6 +63,10 @@ while True:
             if len(buf) - i < PK2:
                 break
             typ = buf[i + 1]
+            if binascii.crc_hqx(buf[i + 2:i + PK2 - 2], 0xFFFF) != struct.unpack_from("<H", buf, i + PK2 - 2)[0]:
+                bad_crc += 1                         # not a whole packet: resync on the next byte
+                i += 1
+                continue
             n0 = struct.unpack_from("<I", buf, i + 2)[0]
             # the packet's 32-bit sample number wraps after 24.9 days: unwrap (a reboot starts again)
             hi, last = n0_hi.get(typ, (0, None))
@@ -66,7 +76,9 @@ while True:
             n0 += hi
             if typ not in files or time.time() - files[typ][2] >= 600:
                 open_c64(typ, utc())
-            files[typ][0].write(buf[i + 6:i + PK2]); files[typ][0].flush()
+            files[typ][0].write(buf[i + 6:i + PK2 - 2]); files[typ][0].flush()
+            if line:                                 # packets and text lines are sent whole: what is
+                bad_txt += 1; line = b""             # pending here is the rest of a broken packet
             files[typ][1].write(f"{n0},{now_t:.3f}\n")
             i += PK2
             continue
@@ -89,12 +101,19 @@ while True:
         c = buf[i:i + 1]
         i += 1
         if c == b"\n":
-            txt = line.decode(errors="replace").strip()
-            if txt:
-                log.write(f"{utc().isoformat(timespec='milliseconds')} {txt}\n")
+            if any(b > 0x7E or (b < 0x20 and b != 9) for b in line):
+                bad_txt += 1                         # the remains of a broken packet, not a line
+            else:
+                txt = line.decode().strip()
+                if txt:
+                    log.write(f"{utc().isoformat(timespec='milliseconds')} {txt}\n")
             line = b""
         elif c != b"\r":
             line += c
             if len(line) > 1000:
                 line = b""
     buf = buf[i:]
+    if time.time() - t_report >= 600:
+        if bad_crc or bad_txt:
+            log.write(f"{utc().isoformat(timespec='milliseconds')} LOGGER last 10 min: {bad_crc} packet starts with a bad CRC, {bad_txt} binary lines dropped\n")
+        bad_crc = bad_txt = 0; t_report = time.time()

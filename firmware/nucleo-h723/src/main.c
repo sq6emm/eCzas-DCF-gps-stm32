@@ -586,16 +586,26 @@ static void dcf_new_line(void)
 }
 static void dcf_report(void);
 #ifdef AUDIO_DUMP
+static uint16_t crc16(const uint8_t *p, uint32_t n)   /* CRC-16/CCITT-FALSE (Python: binascii.crc_hqx(d, 0xFFFF)) */
+{
+    uint16_t c = 0xFFFF;
+    while (n--) { c ^= (uint16_t)(*p++ << 8); for (int k = 0; k < 8; k++) c = c & 0x8000 ? (uint16_t)(c << 1 ^ 0x1021) : (uint16_t)(c << 1); }
+    return c;
+}
 static void dump(uint8_t type, float zr, float zi)
-{   /* packet: A5 <type>, u32 index of the first 2 kHz sample, 200 x (float re, float im);
-       type 5B = DCF77, 5C = e-CzasPL (both the mixer output, before the trackers) */
-    typedef struct __attribute__((packed)) { uint8_t m0, m1; uint32_t n0; float x[400]; } pk_t;
-    static pk_t pk[2] = { { 0xA5, 0x5B, 0, {0} }, { 0xA5, 0x5C, 0, {0} } };
+{   /* packet: A5 <type>, u32 index of the first 2 kHz sample, 200 x (float re, float im), u16 CRC of
+       index + samples; type 5B = DCF77, 5C = e-CzasPL (both the mixer output, before the trackers).
+       The CRC: bytes lost on the ST-LINK serial link left packets with a right index and wrong data */
+    typedef struct __attribute__((packed)) { uint8_t m0, m1; uint32_t n0; float x[400]; uint16_t crc; } pk_t;
+    static pk_t pk[2] = { { 0xA5, 0x5B, 0, {0}, 0 }, { 0xA5, 0x5C, 0, {0}, 0 } };
     static int pn[2];
     int w = type == 0x5C;
     if (pn[w] == 0) pk[w].n0 = (uint32_t)n2k;
     pk[w].x[2 * pn[w]] = zr; pk[w].x[2 * pn[w] + 1] = zi;
-    if (++pn[w] == 200) { uart_write(&pk[w], sizeof pk[w]); pn[w] = 0; }
+    if (++pn[w] == 200) {
+        pk[w].crc = crc16((const uint8_t *)&pk[w].n0, sizeof pk[w].n0 + sizeof pk[w].x);
+        uart_write(&pk[w], sizeof pk[w]); pn[w] = 0;
+    }
 }
 #endif
 static int64_t now_tick(void);
