@@ -26,6 +26,7 @@ for raw in open(a.log, "rb"):
     m = PAT.search(l)
     if not m or not (a.t0 <= m.group(1) < a.t1): continue
     t = dt.datetime.fromisoformat(m.group(1)[:19]).replace(tzinfo=dt.timezone.utc)
+    if m.group(2) == "-": continue                 # no GPS value that minute (fewer than 50 pulses)
     g = float(m.group(2)); d = None if m.group(5) == "-" else float(m.group(5)); e = None if m.group(6) == "-" else float(m.group(6))
     rows.append((t, g, d, e))
 if not rows: sys.exit("no REFS lines with a GPS value (firmware with the GPS lock?)")
