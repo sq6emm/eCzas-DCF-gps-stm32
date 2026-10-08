@@ -930,7 +930,9 @@ static void handle_candidate(void)
         }
     }
     if (st != FR_OK) {
-        snprintf(m, sizeof m, "#%lu corr %d%% - not decodable (snr %d dB)", (unsigned long)n_heard, c->corr_q10 * 100 / 1024, fi.snr_db);
+        if (st == FR_NO_SIGNAL)                /* the levels did not separate: no snr was measured */
+            snprintf(m, sizeof m, "#%lu corr %d%% - not decodable (no signal)", (unsigned long)n_heard, c->corr_q10 * 100 / 1024);
+        else snprintf(m, sizeof m, "#%lu corr %d%% - not decodable (snr %d dB)", (unsigned long)n_heard, c->corr_q10 * 100 / 1024, fi.snr_db);
         put_line("FRAME", m);
         ez.cand_ready = 0;
         return;
@@ -1304,8 +1306,11 @@ int main(void)
             }
             static const char *PS[] = { "searching", "pulling in", "locked" };
             uint32_t sec;
-            char d1[40] = "no time yet", b4[16];
-            if (tk_time(&tk, now_tick(), &sec, 0)) date_str(d1, sec, 0);
+            char d1[52] = "no time yet", b4[16];
+            if (tk_time(&tk, now_tick(), &sec, 0)) {
+                date_str(d1, sec, 0);
+                if (!tk_valid(&tk, now_tick())) strcat(d1, " (holdover > 24 h)");   /* no good frame for a day */
+            }
             snprintf(m, sizeof m, "%s | eCzas carrier %s %s Hz noise %s deg lvl0 %s | heard %lu, decoded %lu, confirmed %lu, rejected %lu | DCF77 carrier %s %s mHz | clock %+ld ppm (" REF_NAME ") | cpu %lu%%, longest block %lu ms, max lag %lu ms | adc A0 mean %ld min %lu max %lu, A1 mean %ld min %lu max %lu%s",
                      d1, PS[trk_e.state], f1(b1, trk_e.hz, 1), f1(b2, trk_e.err_avg * 360, 0), f1(b3, trk_e.lvl0 * 360, 0),
                      (unsigned long)n_heard, (unsigned long)n_decoded, (unsigned long)n_conf, (unsigned long)n_rej,
@@ -1315,6 +1320,7 @@ int main(void)
                      lroundf(adc_mean2), (unsigned long)adc_min2, (unsigned long)adc_max2,
                      overruns ? " OVERRUN" : "");
             if (pl_bad) { strcat(m, " PLBAD"); pl_bad = 0; }
+            if (ez.cand_overrun) { strcat(m, " CANDOVR"); ez.cand_overrun = 0; }   /* a frame candidate came before the last was handled */
             {   /* output lost because the TX ring was full */
                 static uint32_t drops_seen;
                 uint32_t dr = tx_drops;
