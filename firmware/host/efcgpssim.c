@@ -4,7 +4,8 @@
  *          2: DCF77 only (the loop before the GPS lock, for comparison); 3: cold start 20 ppb off, GPS;
  *          4: spoofed GPS phase STEP of 550 ns at mid-run (+ offset s into the minute: review 3 found a
  *          mid-minute step undetected by the minute-mean check); 5: spoofed GPS FREQUENCY +20 ppb from mid-run;
- *          6: as 0, but the EFC slope calibrated at the start (efc_init slope 0) - must end locked, not FAILED
+ *          6: as 0, but the EFC slope calibrated at the start (efc_init slope 0) - must end locked, not FAILED;
+ *          7: spoofed GPS frequency ramping slowly from mid-run (+0.4 ppb per 10 min: must not be learned in)
  * OCXO: y_free = offset + random-walk FM + ageing + daily temperature swing; y = y_free - slope (code - c0)
  * (> 0: slow, as in efc.c); the DAC is dithered by efc_tick as on the board. GPS PPS: jitter 20 ns rms on the
  * pulse phase (NEO-7P, 1 Oct 2026); the firmware's unwrap / 10 us glitch filter / minute mean are copied.
@@ -47,7 +48,8 @@ int main(int argc, char **argv)
         ysum_min += y;
         int gps_on = mode != 2 && !(mode == 1 && t > N / 2 - 3 * 3600 && t < N / 2 + 3 * 3600);
         if (gps_on) {                                                  /* the firmware's PPS processing */
-            double spoof = (mode == 4 && t > N / 2 + toff) ? 550e-9 : (mode == 5 && t > N / 2) ? -20e-9 * (t - N / 2) : 0;
+            double spoof = (mode == 4 && t > N / 2 + toff) ? 550e-9 : (mode == 5 && t > N / 2) ? -20e-9 * (t - N / 2)
+                         : (mode == 7 && t > N / 2) ? -0.5 * (0.4e-9 / 600) * (double)(t - N / 2) * (t - N / 2) : 0;
             double ph = fmod(tocxo + spoof + 20e-9 * gauss(), 1.0); if (ph < 0) ph += 1;
             if (have) {
                 double st = -(ph - ph_prev); st -= floor(st + 0.5);
@@ -75,7 +77,7 @@ int main(int argc, char **argv)
         }
     }
     printf("mode %d (%s), %.1f days, tau_gps %.0f s: time error vs GPS rms %.1f ns max %.1f ns | OCXO ADEV",
-           mode, mode == 0 ? "GPS" : mode == 1 ? "GPS, 6 h outage" : mode == 2 ? "DCF77 only" : mode == 3 ? "GPS, cold start 20 ppb" : mode == 4 ? "GPS, spoofed 550 ns step" : mode == 5 ? "GPS, spoofed +20 ppb" : "GPS, calibrated at start",
+           mode, mode == 0 ? "GPS" : mode == 1 ? "GPS, 6 h outage" : mode == 2 ? "DCF77 only" : mode == 3 ? "GPS, cold start 20 ppb" : mode == 4 ? "GPS, spoofed 550 ns step" : mode == 5 ? "GPS, spoofed +20 ppb" : mode == 6 ? "GPS, calibrated at start" : "GPS, spoofed slow ramp",
            days, f.tau, sqrt(sx2 / nx) * 1e9, xmax * 1e9);
     int taus[] = { 1, 10, 60, 180, 360 };
     for (int k = 0; k < 5; k++) {

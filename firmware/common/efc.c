@@ -83,6 +83,10 @@
 #ifndef EFC_FAIL_RETRY
 #define EFC_FAIL_RETRY 60          /* minutes in FAIL before the calibration is tried again */
 #endif
+#ifndef EFC_GPS_OFS_MAX
+#define EFC_GPS_OFS_MAX 3e-9       /* the stations' offsets learned against GPS stay within this (e-CzasPL ~-0.85 ppb,
+                                      DCF77 ~0): a GPS wrong from the start, or ramping away slowly, is not learned in */
+#endif
 #define EFC_MAX 4095.0
 
 static double clampc(double c) { return c < 0 ? 0 : c > EFC_MAX ? EFC_MAX : c; }
@@ -203,8 +207,8 @@ int efc_minute3(efc_t *f, int vg, double xg, int vd, double yd, int ve, double y
                     f->gsus_why = 2;
                 } else if (!f->gsus) {                                   /* agreeing: learn the offsets (~3 h) */
                     double k = f->nbg < 30 ? 1.0 / (f->nbg / 10 + 1) : 10.0 / 180;
-                    if (dok) f->bdg += (f->dg10 / f->nd10 - f->bdg) * k;
-                    if (eok) f->beg += (f->eg10 / f->ne10 - f->beg) * k;
+                    if (dok) f->bdg = fmax(-EFC_GPS_OFS_MAX, fmin(EFC_GPS_OFS_MAX, f->bdg + (f->dg10 / f->nd10 - f->bdg) * k));
+                    if (eok) f->beg = fmax(-EFC_GPS_OFS_MAX, fmin(EFC_GPS_OFS_MAX, f->beg + (f->eg10 / f->ne10 - f->beg) * k));
                     f->nbg += 10;
                 } else if (f->gsus_why == 2 && f->gsus > 1) f->gsus = 1;  /* agreeing again: resume next minute */
                 f->n10g = f->nd10 = f->ne10 = 0; f->dg10 = f->eg10 = 0;
@@ -242,6 +246,15 @@ int efc_minute3(efc_t *f, int vg, double xg, int vd, double yd, int ve, double y
 }
 
 static void to_wait(efc_t *f) { f->state = EFC_WAIT; f->n = 0; f->src = EFC_SRC_NONE; }
+
+/* PI on the time error x: the new target code; no integration while it is against a rail (anti-windup) */
+static void pi_step(efc_t *f, double T)
+{
+    const double wn = 1.0 / f->tau, kp = 2 * 0.7 * wn, ki = wn * wn;
+    double integ = f->integ + ki * f->x * T, t = f->cref + (kp * f->x + integ) / f->slope;
+    if (t >= 0 && t <= EFC_MAX) f->integ = integ;
+    f->target = clampc(t);
+}
 
 void efc_minute(efc_t *f, int src, double y, double T)
 {
@@ -307,10 +320,8 @@ void efc_minute(efc_t *f, int src, double y, double T)
         f->outliers = 0;
         if (src == EFC_SRC_GPS) {                      /* phase measured directly: PI on it */
             f->tau = EFC_TAU_GPS;
-            const double wn = 1.0 / f->tau, kp = 2 * 0.7 * wn, ki = wn * wn;
             f->x = f->gx;
-            f->integ += ki * f->x * T;
-            f->target = clampc(f->cref + (kp * f->x + f->integ) / f->slope);
+            pi_step(f, T);
             break;
         }
         {
@@ -323,10 +334,8 @@ void efc_minute(efc_t *f, int src, double y, double T)
             if (r > EFC_TAU_MAXF) r = EFC_TAU_MAXF;
             f->tau += (EFC_TAU * r - f->tau) * T / 1800;  /* changes slowly (30 min) */
             if (f->tau < EFC_TAU) f->tau = EFC_TAU;
-            const double wn = 1.0 / f->tau, kp = 2 * 0.7 * wn, ki = wn * wn;
             f->x += y * T;
-            f->integ += ki * f->x * T;
-            f->target = clampc(f->cref + (kp * f->x + f->integ) / f->slope);
+            pi_step(f, T);
         }
         break;
     case EFC_FAIL:                                    /* EFC not responding: try again after a while */

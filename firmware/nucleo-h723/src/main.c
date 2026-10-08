@@ -349,6 +349,10 @@ static int lse_ok;
 static TIM_HandleTypeDef htim2, htim3;
 static int ocxo_itr = -1;
 static efc_t efc;                          /* EFC steering from the carriers (common/efc.c) */
+/* the locked EFC code, kept over a reset (watchdog, fault, st-flash --reset) but not a power cycle:
+   the start does not step back to the fixed EFC_INIT (the OCXO ages) */
+static uint32_t efc_keep[2] __attribute__((section(".noinit")));   /* EFC_KEEP_MAGIC, code x 16 */
+#define EFC_KEEP_MAGIC 0xEFC0C0DEu
 static void efc_set(uint32_t code)
 {
     DAC1->DHR12R2 = code & 0xFFF;
@@ -358,8 +362,15 @@ static void ocxo_init(void)
     /* EFC: DAC1 channel 2 on PA5 (analog by default), buffered, mid-scale */
     __HAL_RCC_DAC12_CLK_ENABLE();
     DAC1->CR |= DAC_CR_EN2;
-    efc_set(EFC_INIT);
-    efc_init(&efc, EFC_INIT, EFC_SLOPE);
+    int kept = efc_keep[0] == EFC_KEEP_MAGIC && efc_keep[1] <= 4095 * 16;
+    double c0 = kept ? efc_keep[1] / 16.0 : EFC_INIT;
+    efc_set((uint32_t)lround(c0));
+    efc_init(&efc, c0, EFC_SLOPE);
+    {
+        char m[80], b1[16];
+        snprintf(m, sizeof m, "OCXO EFC start code %s (%s)\r\n", f1(b1, c0, 0), kept ? "kept from before the reset" : "EFC_INIT");
+        uart_puts(m);
+    }
     /* PA0 = TIM2_ETR (AF1) */
     __HAL_RCC_GPIOA_CLK_ENABLE(); __HAL_RCC_TIM2_CLK_ENABLE(); __HAL_RCC_TIM3_CLK_ENABLE();
     GPIO_InitTypeDef g = {0};
@@ -1214,6 +1225,9 @@ int main(void)
                 efc.gjump_ext = gps_jump; gps_jump = 0;
                 double yd = rd2.freq_hz / F_DCF, ye = re.freq_hz / F_CARRIER;
                 int src = efc_minute3(&efc, vg, xg, vd, yd, ve, ye, 60.0);
+                if (efc.state == EFC_LOCK && !efc.skip && efc.src != EFC_SRC_NONE) {
+                    efc_keep[0] = EFC_KEEP_MAGIC; efc_keep[1] = (uint32_t)lround(efc.c * 16);
+                }
                 static const char *SRC[] = { "none", "DCF77", "e-CzasPL", "DCF77+e-CzasPL", "GPS" };
                 {   /* the three references against the OCXO, every minute (> 0: the OCXO runs slow against it);
                        with the GPS steering, DCF77 and e-CzasPL here are their carriers against GPS */
