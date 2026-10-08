@@ -58,8 +58,12 @@ typedef struct {
 } dcfbits_t;
 
 void dcfbits_init(dcfbits_t *b);
+/* drop the minute being collected (after dcf_restart: its seconds were on another line or mark);
+   levels, polarity, counters and the last confirmed minute stay */
+void dcfbits_restart(dcfbits_t *b);
 /* one 2 kHz sample: i = in-phase (carrier on the real axis, as for dcf_push), q = quadrature;
-   n = dcf's sample count of THIS sample. Returns 1 when a minute was just decoded (see b->status). */
+   n = dcf's sample count of THIS sample; only samples dcf_push found usable (d->amp_low == 0) count.
+   Returns 1 when a minute was just decoded (see b->status). */
 int  dcfbits_push(dcfbits_t *b, const dcf_t *d, float i, float q, uint64_t n, int valid);
 
 #endif

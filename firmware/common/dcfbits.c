@@ -21,6 +21,13 @@ void dcfbits_init(dcfbits_t *b)
     b->lev_red = 0.15f; b->var_am = 0.1f; b->var_pm = 1.0f; b->amp_pm = 0.0f; b->amp_pmk = 0.27f;
 }
 
+void dcfbits_restart(dcfbits_t *b)
+{
+    b->am0 = b->am1 = b->ref = b->pm = 0; b->n0 = b->n1 = b->nr = b->npm = 0;
+    b->ii2 = b->qq2 = 0; b->nii = b->nqq = 0;
+    memset(b->have, 0, sizeof b->have);
+}
+
 static int bcd(const uint8_t *x, int from, int n, int *v)
 {
     static const int w[8] = { 1, 2, 4, 8, 10, 20, 40, 80 };
@@ -198,10 +205,10 @@ static void decode(dcfbits_t *b, uint64_t n_end)
 
 int dcfbits_push(dcfbits_t *b, const dcf_t *d, float i, float q, uint64_t n, int valid)
 {
-    if (!d->have_mark || d->amp <= 0) return 0;
+    if (!d->have_mark) return 0;
     int p = (int)((n + DCF_SPS - d->mark) % DCF_SPS);      /* position in the DCF77 second, 0 = drop */
     float a = d->amp;
-    if (valid) {
+    if (valid && !d->amp_low) {
         if (p >= 20 && p < 180) { b->am0 += i / a; b->n0++; }        /* 10..90 ms: always reduced (not in s59) */
         else if (p >= 220 && p < 380) { b->am1 += i / a; b->n1++; }  /* 110..190 ms: reduced only for bit 1 */
         else if (p >= 600 && p < 1800) { b->ref += i / a; b->nr++; b->ii2 += (i / a) * (i / a); b->nii++; } /* 300..900 ms: full carrier */

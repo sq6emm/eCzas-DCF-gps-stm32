@@ -503,6 +503,8 @@ static ecz_t ez;
 static dcf_t dcf;
 static dcfbits_t dcfb;                     /* DCF77 time code, every minute */
 static int dcf_blocks_locked, dcf_line_proven; static float dcf_line_hz = 1e9f;
+static uint64_t dcf_excl_until;            /* n2k at which the rejected carriers are forgotten */
+#define DCF_EXCL_KEEP (6ULL * 3600 * 2000)  /* 6 h */
 /* DCF77 counts as locked only when the tracked line also carries confirmed second marks
    (a local spur can be tracked, but it has no 1-s amplitude pattern) */
 static int dcf_verified(void)
@@ -616,6 +618,19 @@ static void station_samples(float er, float ei, float dr, float di)
     if (coh_push(&trk_e, er, ei, &a, &b, &ir, &ii))
         ecz_push(&ez, (int16_t)lrintf(atan2f(ii, ir) * (32768.0f / (float)M_PI)));
     coh_push(&trk_d, dr, di, &a, &b, &ir, &ii);
+    /* the loop is on another line than the one the DCF77 state was learned on: start that state
+       afresh. 7 Oct 2026 the loop slid onto a spur at -1.6 Hz in a fade; the spur's data (and the
+       fold shifted by its frequency) kept the returned DCF77 carrier without second marks for an
+       hour, so 0 Hz was rejected and DCF77 never found again until a reset */
+    if (trk_d.state == COH_TRACK && fabsf((float)trk_d.hz - dcf_line_hz) > 0.15f) {
+        if (dcf_line_hz < 1e8f) {
+            char m[100], b1[16], b2[16];
+            snprintf(m, sizeof m, "carrier now at %s Hz (was %s Hz) - DCF77 state restarted", f1(b1, trk_d.hz, 2), f1(b2, dcf_line_hz, 2));
+            put_line("DCF77", m);
+        }
+        dcf_line_hz = (float)trk_d.hz; dcf_blocks_locked = 0; dcf_line_proven = 0;
+        dcf_restart(&dcf); dcfbits_restart(&dcfb);
+    }
     dcf_push(&dcf, a, b, trk_d.state == COH_TRACK);
     if (dcfbits_push(&dcfb, &dcf, a, b, dcf.n - 1, trk_d.state == COH_TRACK)) dcf_time_report();
     n2k++;
@@ -651,24 +666,46 @@ static void station_samples(float er, float ei, float dr, float di)
     if (n2k == 360000 && !dcf.have_mark && trk_d.state != COH_SEARCH) { coh_search(&trk_d); put_line("DCF77", "no second marks 3 min after the blind pull-in - searching"); }
 #endif
     static float blk_hz;                  /* carrier at the block's first step (dcf_block_step) */
-    if (blk) blk_hz = trk_d.state == COH_TRACK ? (float)trk_d.hz : 0.0f;
+    if (blk) {
+        blk_hz = trk_d.state == COH_TRACK ? (float)trk_d.hz : 0.0f;
+#ifdef OCXO_REF
+        if (fabsf(blk_hz) > 0.05f) blk_hz = 0.0f;   /* DCF77 is within mHz of 0 Hz on the OCXO: no drift */
+#endif
+    }
     if (dcf_block_step(&dcf, blk_hz)) {   /* 10-min block in four ~8 ms steps (was ~24 ms in one sample) */
         /* carrier check: a DCF77 carrier has second marks; none in the first 60 min on a
          * line -> it is something else (a local spur): reject it, search again. The count
          * goes on through re-searches that find the same line again (+-0.15 Hz: a spur moves
          * with the LSE and is often lost and found again). A line that has shown marks is
-         * DCF77 and is never rejected (its marks may fade for a while) */
+         * DCF77 and is never rejected (its marks may fade for a while). A line on another
+         * frequency restarts the count and the DCF77 state (above, every sample) */
         if (trk_d.state != COH_SEARCH) {
-            if (fabsf((float)trk_d.hz - dcf_line_hz) > 0.15f) { dcf_line_hz = (float)trk_d.hz; dcf_blocks_locked = 1; dcf_line_proven = 0; }
-            else dcf_blocks_locked++;
+            dcf_blocks_locked++;
             if (dcf.mark_sigma >= 6) dcf_line_proven = 1;
+            if (dcf_verified()) dcf_line_hz = (float)trk_d.hz;      /* follows the LSE's slow drift */
         }
         if (!dcf_line_proven && dcf_blocks_locked >= 6 && dcf.mark_sigma < 6) {
-            char m[80], b1[16];
-            snprintf(m, sizeof m, "carrier at %s Hz has no second marks - rejected, searching", f1(b1, trk_d.hz, 1));
-            put_line("DCF77", m);
-            coh_reject(&trk_d, 0.05f); dcf_blocks_locked = 0; memset(dcf.yr, 0, sizeof dcf.yr);
-            dcf.have_mark = 0; dcf.mark_sigma = 0;           /* the new line must prove itself */
+            char m[100], b1[16];
+#ifdef OCXO_REF
+            if (fabsf((float)trk_d.hz) < 0.05f) {
+                /* on the OCXO this is where DCF77 must be: never reject it (DCF77 off the air or
+                   faded) - start its state afresh and keep listening */
+                snprintf(m, sizeof m, "carrier at %s Hz has no second marks for 60 min - DCF77 state restarted, line kept", f1(b1, trk_d.hz, 2));
+                put_line("DCF77", m);
+            } else
+#endif
+            {
+                snprintf(m, sizeof m, "carrier at %s Hz has no second marks - rejected for 6 h, searching", f1(b1, trk_d.hz, 1));
+                put_line("DCF77", m);
+                coh_reject(&trk_d, 0.05f); dcf_excl_until = n2k + DCF_EXCL_KEEP;
+            }
+            dcf_blocks_locked = 0;
+            dcf_restart(&dcf); dcfbits_restart(&dcfb);      /* the new line must prove itself */
+        }
+        /* rejections are not for ever: a carrier rejected by mistake (or a spur gone) is tried again */
+        if (trk_d.n_excl && n2k >= dcf_excl_until) {
+            trk_d.n_excl = 0;
+            put_line("DCF77", "rejected carriers forgotten after 6 h");
         }
         dcf_report();
     }

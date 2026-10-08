@@ -31,15 +31,26 @@
 #define DCF_MIN_MIN 5.0f                /* minute accepted above this many sigma */
 #endif
 #define DCF_LAGW    120                 /* phase-code search +-60 ms around the second mark */
+#ifndef DCF_AMP_MIN
+#define DCF_AMP_MIN 0.3f                /* samples count only while the carrier amplitude is above this
+                                           fraction of its reference level (see amp_ref): in a fade the
+                                           amplitude goes to ~0 and dividing by it filled the running sums
+                                           with huge values for hours (7 Oct 2026: minute sigma 3678, no
+                                           second marks on the returned carrier, 0 Hz rejected) */
+#endif
 
 typedef struct {
     /* input bookkeeping */
     uint64_t n;                         /* samples seen */
-    float    amp;                       /* running carrier amplitude (in-phase mean) */
+    float    amp;                       /* running carrier amplitude (in-phase mean, ~20 s) */
+    float    amp_ref;                   /* its reference level: follows a rise in ~20 s, a fall over ~1 h */
+    uint32_t amp_n;                     /* valid samples since the start (amp is a plain mean until 20 s) */
+    int      amp_low;                   /* this sample: not valid, or amp < DCF_AMP_MIN * amp_ref - not used */
+    uint32_t good_run;                  /* consecutive usable samples (a dip / phase-code window needs all) */
     /* second-mark fold (this block) and running */
     float    yf[DCF_SPS];
     float    yr[DCF_SPS];
-    int      nsec;                      /* complete seconds in this block */
+    float    nval;                      /* usable samples in this block's fold (yf holds i / amp) */
     /* per second-of-minute dip depth, running */
     float    dip[60], dipn[60];
     float    sec_y0, sec_y1; int sec_k0, sec_k1;   /* current second's dip / level sums */
@@ -66,6 +77,9 @@ typedef struct {
 void dcf_init(dcf_t *d);
 /* one derotated sample (carrier on the real axis); `valid` = carrier tracker tracking */
 void dcf_push(dcf_t *d, float i, float q, int valid);
+/* forget everything learned about the carrier (folds, marks, minute, phase code, amplitude), keep the
+ * sample count and the block grid: for a new line, so a spur's data never mixes with DCF77's */
+void dcf_restart(dcf_t *d);
 /* after every DCF_BLOCK_S seconds (d->n % (DCF_SPS*DCF_BLOCK_S) == 0) */
 int  dcf_block_ready(const dcf_t *d);
 /* evaluate the block, update results. carrier_hz = the DCF77 carrier offset measured by the

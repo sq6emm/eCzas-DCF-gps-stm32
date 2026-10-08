@@ -53,6 +53,15 @@ void dcf_init(dcf_t *d)
     d->amp = 0;
 }
 
+void dcf_restart(dcf_t *d)
+{
+    uint64_t n = d->n, stage_n = d->stage_n; int stage = d->stage;
+    memset(d, 0, sizeof *d);
+    d->n = n; d->stage = stage; d->stage_n = stage_n;
+    d->minute_s = -1;
+    d->pm_ref = -1;
+}
+
 static float kth(float *a, int n, int k)      /* quickselect, reorders a[] */
 {
     int lo = 0, hi = n - 1;
@@ -87,20 +96,30 @@ void dcf_push(dcf_t *d, float i, float q, int valid)
 {
     uint64_t n = d->n++;
     int k = (int)(n % DCF_SPS);
-    if (!valid) { if (k == DCF_SPS - 1) d->nsec += 0; return; }
-    d->amp += (i - d->amp) * (1.0f / 40000);            /* ~20 s */
-    d->yf[k] += i;
-    if (k == DCF_SPS - 1) d->nsec++;
+    if (valid) {
+        d->amp_n++;
+        d->amp += (i - d->amp) / (float)(d->amp_n < 40000 ? d->amp_n : 40000);   /* mean, then ~20 s */
+        if (d->amp_n >= 2000)
+            d->amp_ref += (d->amp - d->amp_ref) * (d->amp > d->amp_ref ? 1.0f / 40000 : 1.0f / 7200000);
+    }
+    /* usable: tracking, the amplitude settled (1 s) and not faded below DCF_AMP_MIN of its reference */
+    d->amp_low = !valid || d->amp_n < 2000 || d->amp <= 0 || d->amp < DCF_AMP_MIN * d->amp_ref;
+    d->good_run = d->amp_low ? 0 : d->good_run + 1;
     qring[n & (QRING - 1)] = q;
+    if (d->amp_low) {                                    /* the current second's dip is incomplete */
+        d->sec_y0 = d->sec_y1 = 0; d->sec_k0 = d->sec_k1 = 0;
+        return;
+    }
+    d->yf[k] += i / d->amp; d->nval += 1;
 
-    if (!d->have_mark || d->amp <= 0) return;
+    if (!d->have_mark) return;
     {
         int p = (int)((n + DCF_SPS - d->mark) % DCF_SPS);  /* position in the DCF77 second */
         if (p >= 10 && p < 190) { d->sec_y0 += i; d->sec_k0++; }
         else if (p >= 400 && p < 1900) { d->sec_y1 += i; d->sec_k1++; }
         if (p == DCF_SPS - 1) {
             uint64_t sd = (n - d->mark) / DCF_SPS;       /* DCF77 second count on the LSE scale */
-            if (d->sec_k0 > 100 && d->sec_k1 > 1000) {
+            if (d->good_run >= DCF_SPS && d->sec_k0 > 100 && d->sec_k1 > 1000) {
                 float dip = (d->sec_y1 / d->sec_k1 - d->sec_y0 / d->sec_k0) / d->amp;
                 d->dip[sd % 60] += dip; d->dipn[sd % 60] += 1;
             }
@@ -110,7 +129,7 @@ void dcf_push(dcf_t *d, float i, float q, int valid)
            The fold is anchored at pm_ref (not at the mark: the mark is quantised to 0.5 ms and
            steps with the drift correction, which smeared the fold by 0.5-1 ms) */
         int pr = d->pm_ref >= 0 ? (int)((n + DCF_SPS - d->pm_ref) % DCF_SPS) : -1;
-        if (pr == DCF_LAGW - 1 && d->have_minute && n >= (uint64_t)(WIN + DCF_SPS)) {
+        if (pr == DCF_LAGW - 1 && d->have_minute && d->good_run >= WIN && n >= (uint64_t)(WIN + DCF_SPS)) {
             uint64_t sd = (n - d->pm_ref) / DCF_SPS - 1; /* the second just completed */
             int sm = (int)((sd + 60 - (uint64_t)d->minute_s - 1) % 60), j;
             float sg = sm <= 9 ? -1.0f : sm <= 14 ? 1.0f : 0.0f;
@@ -189,8 +208,8 @@ int dcf_quick_mark(dcf_t *d, float min_sigma)
 {
     static float t[DCF_SPS];
     float s; int k, best;
-    if (d->have_mark || d->nsec < 60 || d->amp <= 0) return 0;
-    for (k = 0; k < DCF_SPS; k++) t[k] = d->yf[k] / (d->nsec * d->amp);
+    if (d->have_mark || d->nval < 60.0f * DCF_SPS) return 0;
+    for (k = 0; k < DCF_SPS; k++) t[k] = d->yf[k] * DCF_SPS / d->nval;
     best = mark_find(&mb_quick, t, &s);
     if (s < min_sigma) return 0;
     d->mark = best; d->mark_frac = mark_frac_last; d->mark_sigma = s; d->have_mark = 1;
@@ -300,9 +319,11 @@ static void block_update(dcf_t *d, float carrier_hz)
             d->slip -= sh;
         }
     }
-    if (d->nsec > 0 && d->amp > 0)
-        for (k = 0; k < DCF_SPS; k++) d->yr[k] = DCF_KEEP * d->yr[k] + d->yf[k] / (d->nsec * d->amp);
-    memset(d->yf, 0, sizeof d->yf); d->nsec = 0;
+    /* yf holds i / amp per usable sample: the mean per second-sample; a block without (enough)
+       usable samples only decays the running fold */
+    if (d->nval >= DCF_SPS)
+        for (k = 0; k < DCF_SPS; k++) d->yr[k] = DCF_KEEP * d->yr[k] + d->yf[k] * DCF_SPS / d->nval;
+    memset(d->yf, 0, sizeof d->yf); d->nval = 0;
 }
 
 /* after the mark search: accept it (a moved mark restarts the minute and phase-code folds) */
