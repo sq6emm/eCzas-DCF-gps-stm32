@@ -51,6 +51,7 @@ void dcf_init(dcf_t *d)
     d->minute_s = -1;
     d->pm_ref = -1;
     d->amp = 0;
+    d->usable = 1;                      /* not "faded" before the first block */
 }
 
 void dcf_restart(dcf_t *d)
@@ -60,6 +61,7 @@ void dcf_restart(dcf_t *d)
     d->n = n;                           /* (stage 0: a block being evaluated is dropped) */
     d->minute_s = -1;
     d->pm_ref = -1;
+    d->usable = 1;
 }
 
 static float kth(float *a, int n, int k)      /* quickselect, reorders a[] */
