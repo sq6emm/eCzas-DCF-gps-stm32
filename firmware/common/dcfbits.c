@@ -156,6 +156,21 @@ static int on_grid(uint64_t n_end, uint64_t n0, int64_t *el)
     return fabs(dn - (double)*el * 60.0 * DCF_SPS) <= (DCFB_GRID_TOL + DCFB_GRID_PPM * 1e-6 * dn / DCF_SPS) * DCF_SPS;
 }
 
+/* a leap second ends this minute: DCF77 announces it with bit 19 in the hour before, and it is
+   inserted before 00:00 UTC on the 1st of a month; the minute then has 61 s, so the grid of minute
+   ends moves by one second (dcf.c moves its second count: dcf_leap_second) */
+static void leap_check(dcfbits_t *b)
+{
+    int y, mo, d;
+    b->leap_next = 0;
+    if (b->status != DCFT_CONFIRMED && b->status != DCFT_PREDICTED) return;
+    if (!(b->z_am[19] + b->z_pm[19] < 0) || b->utc_min % 1440 != 0) return;
+    civil_from_days(b->utc_min / 1440 + days_from_civil(2000, 1, 1), &y, &mo, &d);
+    if (d != 1) return;
+    b->leap_next = 1;
+    b->ref_n_end += DCF_SPS; b->last_n_end += DCF_SPS;
+}
+
 static void decode(dcfbits_t *b, uint64_t n_end)
 {
     uint8_t x[59]; float r[59];
@@ -209,9 +224,10 @@ static void decode(dcfbits_t *b, uint64_t n_end)
             if (ok) b->n_decoded++; else b->n_failed++;
         }
         if (ok) { b->last_utc_min = b->utc_min; b->last_n_end = n_end; b->have_last = 1; }
+        leap_check(b);
         return;
     }
-    if (!ok) { b->status = DCFT_FAILED; b->n_failed++; return; }
+    if (!ok) { b->status = DCFT_FAILED; b->n_failed++; b->leap_next = 0; return; }
     b->n_decoded++;
     /* first confirmation: two standalone decodes that agree with the minutes elapsed */
     b->status = DCFT_UNCONFIRMED;
@@ -222,6 +238,7 @@ static void decode(dcfbits_t *b, uint64_t n_end)
         }
     }
     b->last_utc_min = b->utc_min; b->last_n_end = n_end; b->have_last = 1;
+    leap_check(b);
 }
 
 int dcfbits_push(dcfbits_t *b, const dcf_t *d, float i, float q, uint64_t n, int valid)

@@ -74,6 +74,8 @@ typedef struct {
     int      pm_block_done;             /* the phase code has been evaluated by a 10-min block */
     int      pm_ref;                    /* phase-code fold anchor (sample in the LSE second): set from the mark once,
                                            then moved only by the drift correction, never by mark noise; -1 = unset */
+    int      leap;                      /* leap second: 1 = this minute has 61 s (second 59 is the extra one),
+                                           2 = its second 59 is over: the minute moves on at the next second */
 } dcf_t;
 
 void dcf_init(dcf_t *d);
@@ -82,6 +84,9 @@ void dcf_push(dcf_t *d, float i, float q, int valid);
 /* forget everything learned about the carrier (folds, marks, minute, phase code, amplitude), keep the
  * sample count and the block grid: for a new line, so a spur's data never mixes with DCF77's */
 void dcf_restart(dcf_t *d);
+/* the minute being received has a leap second (DCF77 announced it; dcfbits leap_next): call during
+   its second 59 at the latest - the second count of the minute moves by one after second 60 */
+void dcf_leap_second(dcf_t *d);
 /* after every DCF_BLOCK_S seconds (d->n % (DCF_SPS*DCF_BLOCK_S) == 0) */
 int  dcf_block_ready(const dcf_t *d);
 /* evaluate the block, update results. carrier_hz = the DCF77 carrier offset measured by the

@@ -110,6 +110,15 @@ void dcf_push(dcf_t *d, float i, float q, int valid)
     if (d->amp_low) d->good_run = 0;
     else if (d->good_run < 2 * WIN) d->good_run++;
     qring[n & (QRING - 1)] = q;
+    if (d->leap == 2 && d->have_mark && (n + DCF_SPS - d->mark) % DCF_SPS == 0) {
+        /* second 60 of a leap minute begins: from here on the minute marker (second 59, no reduction)
+           comes one second later in the count - move the dips and the minute with it */
+        float t[60], u[60]; int c;
+        for (c = 0; c < 60; c++) { t[(c + 1) % 60] = d->dip[c]; u[(c + 1) % 60] = d->dipn[c]; }
+        memcpy(d->dip, t, sizeof t); memcpy(d->dipn, u, sizeof u);
+        if (d->minute_s >= 0) d->minute_s = (d->minute_s + 1) % 60;
+        d->leap = 0;
+    }
     if (d->amp_low) {                                    /* the current second's dip is incomplete */
         d->sec_y0 = d->sec_y1 = 0; d->sec_k0 = d->sec_k1 = 0;
         return;
@@ -125,7 +134,8 @@ void dcf_push(dcf_t *d, float i, float q, int valid)
         else if (p >= 400 && p < 1900) { d->sec_y1 += i; d->sec_k1++; }
         if (p == DCF_SPS - 1) {
             uint64_t sd = (n - d->mark) / DCF_SPS;       /* DCF77 second count on the LSE scale */
-            if (d->good_run >= DCF_SPS && d->sec_k0 > 100 && d->sec_k1 > 1000) {
+            if (d->leap == 1) d->leap = 2;              /* the leap second's own dip is not booked */
+            else if (d->good_run >= DCF_SPS && d->sec_k0 > 100 && d->sec_k1 > 1000) {
                 float dip = (d->sec_y1 / d->sec_k1 - d->sec_y0 / d->sec_k0) / d->amp;
                 d->dip[sd % 60] += dip; d->dipn[sd % 60] += 1;
             }
@@ -240,6 +250,8 @@ static void move_mark(dcf_t *d, int sh)
     memcpy(d->dip, t, sizeof t); memcpy(d->dipn, u, sizeof u);
     if (d->minute_s >= 0) d->minute_s = (d->minute_s + delta + 60) % 60;
 }
+
+void dcf_leap_second(dcf_t *d) { if (d->have_minute) d->leap = 1; }
 
 /* the phase-code fold starts again: its time is no longer valid either */
 static void pm_restart(dcf_t *d)

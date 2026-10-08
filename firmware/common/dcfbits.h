@@ -53,6 +53,8 @@ typedef struct {
     int64_t last_utc_min; uint64_t last_n_end; int have_last;   /* last standalone decode */
     int64_t ref_utc_min; uint64_t ref_n_end; int have_ref; /* last confirmed minute */
     float pred_score, pred_margin;        /* expected-frame fit of the last minute and its lead */
+    int   leap_next;                      /* the minute just decoded is a leap minute (61 s): announced (bit 19)
+                                             and the next minute is 00:00 UTC on the 1st - see dcf_leap_second */
     unsigned long n_predicted;
     unsigned long n_decoded, n_confirmed, n_failed;
 } dcfbits_t;

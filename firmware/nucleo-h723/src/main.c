@@ -722,7 +722,10 @@ static void station_samples(float er, float ei, float dr, float di)
         dcf_new_line();
     }
     dcf_push(&dcf, a, b, trk_d.state == COH_TRACK);
-    if (dcfbits_push(&dcfb, &dcf, a, b, dcf.n - 1, trk_d.state == COH_TRACK)) dcf_time_report();
+    if (dcfbits_push(&dcfb, &dcf, a, b, dcf.n - 1, trk_d.state == COH_TRACK)) {
+        dcf_time_report();
+        if (dcfb.leap_next) { dcf_leap_second(&dcf); put_line("DCF77", "leap second announced: this minute has 61 s"); }
+    }
     n2k++;
     /* until the first second marks: look for them every 10 s in the current block (>= 60 s tracked),
        instead of waiting for the first 10-min block (bench: marks at 120-240 s instead of 600 s) */
