@@ -267,7 +267,10 @@ static uint64_t samples_written(void)      /* total ADC samples the DMA has stor
     static uint64_t last;
     uint32_t w, w2, ndtr;
     do { w = dma_wraps; ndtr = __HAL_DMA_GET_COUNTER(&hdma_adc1); w2 = dma_wraps; } while (w != w2);
-    uint64_t t = (uint64_t)w * (RING_BLK * BLOCK) + (RING_BLK * BLOCK - ndtr);
+    static uint32_t w_last; static uint64_t w_hi;           /* dma_wraps wraps after ~4 years */
+    if (w < w_last) w_hi += 1ULL << 32;
+    w_last = w;
+    uint64_t t = (w_hi + w) * (RING_BLK * BLOCK) + (RING_BLK * BLOCK - ndtr);
     if (t < last) t += RING_BLK * BLOCK;    /* wrapped, interrupt not served yet */
     last = t;
     return t;
@@ -308,6 +311,7 @@ TIM_HandleTypeDef htim16;
 static volatile uint32_t lse_last, lse_sum, lse_cnt, lse_tps, lse_seq;
 static volatile uint32_t lse_log[64]; static volatile int lse_log_n;
 static volatile uint64_t lse_tot_ticks, lse_tot_caps;   /* running totals for per-block rate */
+static volatile uint32_t ref_glitches;     /* captures missed (16-bit interval off by > 1 %, or overcapture) */
 #define CAPR 512                           /* ring of capture tick counts (125 ms) */
 static volatile uint64_t cap_tick[CAPR];
 #ifdef OCXO_REF
@@ -420,23 +424,34 @@ void TIM3_IRQHandler(void)
 void TIM16_IRQHandler(void)
 #endif
 {
+    uint32_t sr = REF_TIM->SR;
 #ifdef OCXO_REF
-    if (REF_TIM->SR & TIM_SR_CC3IF) {          /* GPS PPS: < 250 us after the last OCXO capture */
-        uint32_t c3 = REF_TIM->CCR3;           /* reading CCR3 clears CC3IF */
-        pps_tick = lse_tot_ticks + ((c3 - lse_last) & 0xFFFF);
-        pps_seq++;
+    /* GPS PPS: timed from the capture before it - if a reference capture is pending too and came
+       BEFORE the pulse, that one is booked first (a late interrupt put the pulse 65536 ticks off) */
+    int pps = (sr & TIM_SR_CC3IF) != 0;
+    uint32_t c3 = pps ? REF_TIM->CCR3 : 0;     /* reading CCR3 clears CC3IF */
+    if (pps && (!(sr & TIM_SR_CC1IF) || ((c3 - REF_TIM->CCR1) & 0x8000))) {   /* (CCR1 read clears CC1IF) */
+        pps_tick = lse_tot_ticks + ((c3 - lse_last) & 0xFFFF); pps_seq++; pps = 0;
     }
 #endif
-    if (REF_TIM->SR & TIM_SR_CC1IF) {
+    if (sr & TIM_SR_CC1IF) {
         uint32_t c = REF_TIM->CCR1;            /* reading CCR1 clears CC1IF */
-        uint32_t d = (c - lse_last) & 0xFFFF;
+        uint32_t d = (c - lse_last) & 0xFFFF, e = lse_tps / LSE_WIN;
         lse_last = c;
+        /* a missed capture (interrupts blocked > 1 interval) wraps the 16-bit interval: the true-time
+           mapping is wrong from here on - main recalibrates it */
+        if ((sr & TIM_SR_CC1OF) || (lse_cnt && e && (d > e + e / 100 || d < e - e / 100))) ref_glitches++;
         if (lse_cnt) { lse_sum += d; lse_tot_ticks += d; lse_tot_caps++; }
         cap_tick[lse_tot_caps % CAPR] = lse_tot_ticks;
         if (++lse_cnt == LSE_WIN + 1) { lse_tps = lse_sum; lse_seq++; lse_sum = 0; lse_cnt = 1;
             if (lse_log_n < 64) lse_log[lse_log_n++] = lse_tps; }
     }
-    REF_TIM->SR = ~(TIM_SR_CC1IF | TIM_SR_CC3IF);   /* clear the rest; a capture flag set meanwhile stays */
+#ifdef OCXO_REF
+    if (pps) { pps_tick = lse_tot_ticks + ((c3 - lse_last) & 0xFFFF); pps_seq++; }
+#endif
+    /* reading CCRx cleared CCxIF; only the overcapture flags are cleared here (writing 0 to CCxIF, as
+       before, also dropped a capture that came in during this handler) */
+    REF_TIM->SR = ~(TIM_SR_CC1OF | TIM_SR_CC3OF);
 }
 
 static double cur_tps_ratio = 1.0;        /* true / nominal sample rate */
@@ -719,15 +734,15 @@ static void station_samples(float er, float ei, float dr, float di)
    (500 x clock ratio input samples; the fractional sample is split) */
 static double dec_pos;
 static float acc_r, acc_i;
-static void process_block(const uint32_t *b, float mean, float mean2)
+static void process_block(const uint32_t *b, float mean, float mean2)   /* b NULL: silence */
 {
     double step = 500.0 * cur_tps_ratio;  /* input samples per true 500 us */
     for (int n = 0; n < BLOCK; n++) {
-        float x = (float)(b[n] & 0xFFFF) - mean;
+        float x = b ? (float)(b[n] & 0xFFFF) - mean : 0.0f;
 #ifdef DCF_ON_A0
         float x2 = x; (void)mean2;
 #else
-        float x2 = (float)(b[n] >> 16) - mean2;
+        float x2 = b ? (float)(b[n] >> 16) - mean2 : 0.0f;
 #endif
         float xr = x * mix_c, xi = x * mix_s;
         float x2r = x2 * mx2_c, x2i = x2 * mx2_s;
@@ -747,6 +762,57 @@ static void process_block(const uint32_t *b, float mean, float mean2)
     }
     float m = 1.0f / sqrtf(mix_c * mix_c + mix_s * mix_s);
     mix_c *= m; mix_s *= m;
+}
+
+/* the mixers' phase and rate for the block that ends at input sample rd, from the true time of the
+   reference captures; with pl_ok clear (start, or missed captures) the mapping is calibrated first */
+#ifdef OCXO_REF
+static uint32_t pps_conv;                  /* GPS pulses (pps_seq) converted or dropped */
+#endif
+static void block_timing(uint64_t rd)
+{
+    if (pl_ok) {                      /* phase-locked mixer for samples rd-BLOCK .. rd */
+        double t1 = true_time(200 * (int64_t)rd + pl_c);
+        double dt = (t1 - pl_t) * REF_CAP_S;              /* true seconds in this block */
+        if (dt > 0.004 && dt < 0.006) {
+            double dcyc = F_true * dt;
+            double w = -2 * M_PI * dcyc / BLOCK;
+            double ph0 = -2 * M_PI * pl_cyc;
+            mix_c = (float)cos(ph0); mix_s = (float)sin(ph0);
+            rot_c = (float)cos(w); rot_s = (float)sin(w);
+            f_mix = dcyc * (FS_NOM_HZ / BLOCK);
+            cur_tps_ratio = BLOCK / (dt * FS_NOM_HZ);
+            pl_cyc = fmod(pl_cyc + dcyc, 1.0);
+            {
+                double d2 = F_DCF * dt, p2 = -2 * M_PI * pl_cyc2, w2 = -2 * M_PI * d2 / BLOCK;
+                mx2_c = (float)cos(p2); mx2_s = (float)sin(p2);
+                rt2_c = (float)cos(w2); rt2_s = (float)sin(w2);
+                pl_cyc2 = fmod(pl_cyc2 + d2, 1.0);
+            }
+            blk_ratio_sum += cur_tps_ratio; blk_ratio_n++;
+        } else pl_cyc = fmod(pl_cyc + F_true * dt, 1.0), pl_cyc2 = fmod(pl_cyc2 + F_DCF * dt, 1.0), pl_bad++;
+        pl_t = t1;
+    } else if (lse_ok && lse_seq >= 2) {
+        pl_calibrate();
+        pl_t = true_time(200 * (int64_t)rd + pl_c); pl_cyc = 0;
+        /* anchor of the 2 kHz scale: output n2k begins at input sample (block start - samples
+           already summed into it). pl_t is the block END (rd was advanced): using it put every
+           GPS PPS one block (5 ms) early on the 2 kHz scale - measured 1 Oct 2026 with a NEO-7P */
+        pl_t0 = true_time((int64_t)(200.0 * ((double)(rd - BLOCK) - dec_pos)) + pl_c); pl_n0 = n2k;
+        F_true = F_CARRIER;                /* fixed; the carrier trackers follow the rest */
+        pl_ok = 1;
+#ifdef OCXO_REF
+        pps_conv = pps_seq;                /* a pulse captured before: its capture ring has expired */
+#endif
+        /* this first block is summed below with the true sample rate too: before, cur_tps_ratio was
+           still the nominal 1.0 here (the ADC runs ~6500 ppm fast), so its 10 outputs took 500 instead
+           of ~503 input samples each and every later output - DCF77, e-CzasPL, TDF via e-CzasPL - sat
+           ~32 us late against pl_t0 for the whole boot (review 3, 2 Oct 2026) */
+        {
+            double dt0 = (pl_t - true_time(200 * (int64_t)(rd - BLOCK) + pl_c)) * REF_CAP_S;
+            if (dt0 > 0.004 && dt0 < 0.006) cur_tps_ratio = BLOCK / (dt0 * FS_NOM_HZ);
+        }
+    }
 }
 
 /* ---------------------------------------------------------------- frames */
@@ -903,6 +969,10 @@ int main(void)
     SCB_EnableDCache();
     HAL_Init();
     CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk; DWT->CYCCNT = 0; DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+    /* a debugger halt (e.g. st-flash read) stops the sample trigger and the reference timers with the
+       core, so the time base stays consistent (8 Oct 2026 a read in operation broke it until a reset) */
+    DBGMCU->APB1LFZ1 |= DBGMCU_APB1LFZ1_DBG_TIM2 | DBGMCU_APB1LFZ1_DBG_TIM3 | DBGMCU_APB1LFZ1_DBG_TIM6;
+    DBGMCU->APB2FZ1 |= DBGMCU_APB2FZ1_DBG_TIM16;
     clock_init();
     gpio_uart_init();
     uart_puts("\r\n\r\ne-CzasPL + DCF77 receiver on NUCLEO-H723ZG (M3: coherent, two independent stations)\r\n");
@@ -943,13 +1013,19 @@ int main(void)
 
     float mean = 32768.0f, mean2 = 32768.0f;
     uint64_t next_s = 2000, next_status = 20000, next_carrier = 120000;
+    uint64_t rd = samples_written() / BLOCK * BLOCK;   /* next sample to process (the ADC ran during the start) */
+    uint32_t glitches = ref_glitches;
     for (;;) {
-        static uint64_t rd;               /* next sample to process */
         uint64_t wr = samples_written();
         if (wr < rd + BLOCK) continue;
-        if (wr - rd > (RING_BLK - 1) * BLOCK) {   /* fell a whole ring behind: skip */
+        if (ref_glitches != glitches) {   /* missed reference captures: the true-time mapping is off */
+            glitches = ref_glitches; pl_ok = 0;
+            put_line(REF_NAME, "capture missed (interrupts blocked) - time base recalibrated");
+        }
+        if (wr - rd > (RING_BLK - 2) * BLOCK) {   /* the DMA is about to overwrite rd: skip those blocks as
+                                                     silence, so n2k (the 2 kHz scale) stays on true time */
             overruns++;
-            rd = (wr / BLOCK - 1) * BLOCK;
+            for (uint64_t to = (wr / BLOCK - 1) * BLOCK; rd < to; ) { rd += BLOCK; block_timing(rd); process_block(NULL, mean, mean2); }
         }
         uint32_t c0 = DWT->CYCCNT;
         const uint32_t *b = adc_buf + (rd / BLOCK % RING_BLK) * BLOCK;
@@ -972,45 +1048,7 @@ int main(void)
         mean += 0.01f * ((float)(s / (BLOCK / 50)) - mean);
         mean2 += 0.01f * ((float)(s2 / (BLOCK / 50)) - mean2);
         adc_mean1 = mean; adc_mean2 = mean2;
-        if (pl_ok) {                      /* phase-locked mixer for samples rd-BLOCK .. rd */
-            double t1 = true_time(200 * (int64_t)rd + pl_c);
-            double dt = (t1 - pl_t) * REF_CAP_S;              /* true seconds in this block */
-            if (dt > 0.004 && dt < 0.006) {
-                double dcyc = F_true * dt;
-                double w = -2 * M_PI * dcyc / BLOCK;
-                double ph0 = -2 * M_PI * pl_cyc;
-                mix_c = (float)cos(ph0); mix_s = (float)sin(ph0);
-                rot_c = (float)cos(w); rot_s = (float)sin(w);
-                f_mix = dcyc * (FS_NOM_HZ / BLOCK);
-                cur_tps_ratio = BLOCK / (dt * FS_NOM_HZ);
-                pl_cyc = fmod(pl_cyc + dcyc, 1.0);
-                {
-                    double d2 = F_DCF * dt, p2 = -2 * M_PI * pl_cyc2, w2 = -2 * M_PI * d2 / BLOCK;
-                    mx2_c = (float)cos(p2); mx2_s = (float)sin(p2);
-                    rt2_c = (float)cos(w2); rt2_s = (float)sin(w2);
-                    pl_cyc2 = fmod(pl_cyc2 + d2, 1.0);
-                }
-                blk_ratio_sum += cur_tps_ratio; blk_ratio_n++;
-            } else pl_cyc = fmod(pl_cyc + F_true * dt, 1.0), pl_cyc2 = fmod(pl_cyc2 + F_DCF * dt, 1.0), pl_bad++;
-            pl_t = t1;
-        } else if (lse_ok && lse_seq >= 2) {
-            pl_calibrate();
-            pl_t = true_time(200 * (int64_t)rd + pl_c); pl_cyc = 0;
-            /* anchor of the 2 kHz scale: output n2k begins at input sample (block start - samples
-               already summed into it). pl_t is the block END (rd was advanced): using it put every
-               GPS PPS one block (5 ms) early on the 2 kHz scale - measured 1 Oct 2026 with a NEO-7P */
-            pl_t0 = true_time((int64_t)(200.0 * ((double)(rd - BLOCK) - dec_pos)) + pl_c); pl_n0 = n2k;
-            F_true = F_CARRIER;                /* fixed; the carrier trackers follow the rest */
-            pl_ok = 1;
-            /* this first block is summed below with the true sample rate too: before, cur_tps_ratio was
-               still the nominal 1.0 here (the ADC runs ~6500 ppm fast), so its 10 outputs took 500 instead
-               of ~503 input samples each and every later output - DCF77, e-CzasPL, TDF via e-CzasPL - sat
-               ~32 us late against pl_t0 for the whole boot (review 3, 2 Oct 2026) */
-            {
-                double dt0 = (pl_t - true_time(200 * (int64_t)(rd - BLOCK) + pl_c)) * REF_CAP_S;
-                if (dt0 > 0.004 && dt0 < 0.006) cur_tps_ratio = BLOCK / (dt0 * FS_NOM_HZ);
-            }
-        }
+        block_timing(rd);
         process_block(b, mean, mean2);
         if (!spec_left && n2k >= next_spec) { spec_clear(&spec); spec_left = SPEC_BLOCKS; spec_ctr = 0; next_spec += 1200000; }
         if (spec_left && (++spec_ctr & 3) == 0 && --spec_left >= 0) {   /* every 4th block: ~1 ms per FFT */
@@ -1019,11 +1057,10 @@ int main(void)
         }
 #ifdef OCXO_REF
         {   /* GPS PPS: convert to true time at once - the capture ring (CAPR) holds only ~128 ms */
-            static uint32_t conv;
             uint32_t q = pps_seq;
-            if (q != conv && pl_ok) {
+            if (q != pps_conv && pl_ok) {
                 __disable_irq(); uint64_t pt = pps_tick; __enable_irq();
-                conv = q; pps_tt = true_time((int64_t)pt); pps_new = 1;
+                pps_conv = q; pps_tt = true_time((int64_t)pt); pps_new = 1;
             }
         }
 #endif
@@ -1195,6 +1232,11 @@ int main(void)
                      lroundf(adc_mean2), (unsigned long)adc_min2, (unsigned long)adc_max2,
                      overruns ? " OVERRUN" : "");
             if (pl_bad) { strcat(m, " PLBAD"); pl_bad = 0; }
+            {   /* output lost because the TX ring was full */
+                static uint32_t drops_seen;
+                uint32_t dr = tx_drops;
+                if (dr != drops_seen) { snprintf(m + strlen(m), sizeof m - strlen(m), " TXDROP %lu", (unsigned long)(dr - drops_seen)); drops_seen = dr; }
+            }
             put_line("STATUS", m);
             overruns = 0; busy_cyc = 0; max_lag = 0; max_blk_cyc = 0;
             adc_min1 = adc_min2 = 65535; adc_max1 = adc_max2 = 0;
