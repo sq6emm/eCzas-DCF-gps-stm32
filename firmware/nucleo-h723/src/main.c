@@ -1263,13 +1263,16 @@ int main(void)
                        with the GPS steering, DCF77 and e-CzasPL here are their carriers against GPS */
                     char g1[24], g2[24], g3[24], g4[24];
                     int nn = snprintf(m, sizeof m, "GPS %s ppb, phase %s ns (%d pulses) | DCF77 %s ppb | e-CzasPL %s ppb",
-                             ng >= 50 ? f3(g1, efc.pyg * 1e9) : "-", ng >= 50 ? f1(g2, efc.gx * 1e9, 1) : "-", ng,
+                             /* the raw minute frequency (also while suspended: the loop's own stops then) */
+                             ng >= 50 && efc.gyr_ok ? f3(g1, efc.gyr_prev * 1e9) : "-",
+                             ng >= 50 && efc.gsus == 0 ? f1(g2, efc.gx * 1e9, 1) : "-", ng,
                              vd ? f3(g3, yd * 1e9) : "-", ve ? f3(g4, ye * 1e9) : "-");
                     if (efc.gsus > 0 && nn > 0 && nn < (int)sizeof m)
                         snprintf(m + nn, sizeof m - nn, " | GPS SUSPENDED (%s), %d min", efc.gsus_why == 1 ? "phase jump" : "disagrees with DCF77/e-CzasPL", efc.gsus);
                     put_line("REFS", m);
                 }
                 if (src == EFC_SRC_BOTH && efc.we <= 0) src = EFC_SRC_DCF77;   /* e-CzasPL weight 0: DCF77 steers */
+                if (efc.state == EFC_FAIL) src = EFC_SRC_NONE;                 /* nothing steers in FAIL */
                 char b9[16], b10[16];
                 snprintf(m, sizeof m, "EFC %s = %s V, %s, source %s (e-CzasPL weight %s), offset %s ppb, time error %s ns, slope %s ppb/code, loop %ld s | e-CzasPL-DCF77 %s ppb (%d min)",
                          f1(b1, efc.c, 0), f3(b7, efc.c * 3.3 / 4096), efc_state_txt(&efc), SRC[src], f3(b9, efc.we),
