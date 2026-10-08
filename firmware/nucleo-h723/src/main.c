@@ -1071,6 +1071,51 @@ int main(void)
                 pps_conv = q; pps_tt = true_time((int64_t)pt); pps_new = 1;
             }
         }
+        {   /* GPS PPS at once (it waited for the next second of the 2 kHz scale: with the pulse 0-5 ms after
+               that boundary, 20-30 % of the pulses were overwritten first): OCXO interval error, e-CzasPL
+               clock and DCF77 second against the GPS second */
+            static double t_prev; static uint32_t n_pps;
+            if (pps_new) {
+                pps_new = 0; n_pps++;
+                double tt = pps_tt;                                    /* capture units */
+                double n2 = (double)pl_n0 + (tt - pl_t0) * REF_CAP_S / 0.0005;   /* on the 2 kHz scale */
+                char m[220], b1[16], b2[24], b3[24];
+                const char *fr = "-", *ez_s = "-", *dc_s = "-";
+                if (t_prev > 0) {
+                    double dt = (tt - t_prev) * REF_CAP_S;             /* OCXO seconds between two GPS seconds */
+                    if (dt > 0.9 && dt < 1.1) fr = f1(b1, (1.0 - dt) * 1e9, 1);   /* > 0: OCXO slow */
+                }
+                t_prev = tt;
+                {   /* phase of this pulse within the OCXO second: unwrapped, glitches (> 10 us step) dropped */
+                    double ph = fmod(tt * REF_CAP_S, 1.0);
+                    if (gps_have) {
+                        double st = -(ph - gps_ph_prev);
+                        st -= floor(st + 0.5);                 /* to -0.5 .. 0.5 s */
+                        /* phase jump check per PULSE (review 3: the minute-mean check in efc.c missed a 550 ns
+                           step landing mid-minute - the minute means split it). Normal steps differ from their
+                           running mean by the pulse jitter (~20 ns rms, NEO-7P); a step > GPS_SEC_JUMP, or a
+                           glitch > 10 us after a settled run, marks this minute -> efc suspends the GPS */
+                        if (gps_st_n >= 5 && fabs(st - gps_st_avg) > GPS_SEC_JUMP) gps_jump = 1;
+                        else if (fabs(st) < 1e-5) { gps_st_avg += (st - gps_st_avg) * (gps_st_n < 10 ? 1.0 / (gps_st_n + 1) : 0.1); gps_st_n++; }
+                        if (fabs(st) < 1e-5) { gps_xun += st; gps_xsum += gps_xun; gps_n++; gps_ph_prev = ph; }
+                        else gps_have = 0;                     /* start again at the next pulse */
+                    } else { gps_have = 1; gps_ph_prev = ph; }
+                }
+                uint32_t sec, us;
+                if (tk.synced && tk_time(&tk, (int64_t)(n2 * (TICKS_PER_BLOCK / 4)), &sec, &us)) {
+                    double ms = us / 1000.0; if (ms >= 500) ms -= 1000;     /* > 0: e-CzasPL clock ahead */
+                    ez_s = f3(b2, ms);
+                }
+                if (dcf.have_mark) {
+                    double start = (double)(((uint64_t)n2 - dcf.mark) / 2000 * 2000 + dcf.mark) + (dcf.pm_sigma > DCF_PM_MIN ? dcf.pm_lag_ms * 2.0 : (double)dcf.mark_frac);
+                    double x = fmod(n2 - start, 2000.0); if (x < 0) x += 2000; if (x >= 1000) x -= 2000;
+                    dc_s = f3(b3, x / 2.0);                            /* > 0: the DCF77 second began before the GPS second */
+                }
+                snprintf(m, sizeof m, "PPS #%lu | OCXO %s ppb (1 s) | e-CzasPL clock %s ms | DCF77 second %s ms%s",
+                         (unsigned long)n_pps, fr, ez_s, dc_s, dcf.pm_sigma > DCF_PM_MIN ? " (phase code)" : " (second mark)");
+                put_line("GPS", m);
+            }
+        }
 #endif
         {   /* LD1 / LD2: carrier locked, inverted for LED_BLINK after a decode */
             int l1 = trk_e.state == COH_TRACK && trk_e.err_avg * 360 < 25, l2 = dcf_verified();
@@ -1089,51 +1134,6 @@ int main(void)
             next_s += 2000;
             blk_ratio_sum = 0; blk_ratio_n = 0;
             tk_maintain(&tk, now_tick());
-#ifdef OCXO_REF
-            {   /* GPS PPS: OCXO interval error, e-CzasPL clock and DCF77 second against the GPS second */
-                static double t_prev; static uint32_t n_pps;
-                if (pps_new) {
-                    pps_new = 0; n_pps++;
-                    double tt = pps_tt;                                    /* capture units */
-                    double n2 = (double)pl_n0 + (tt - pl_t0) * REF_CAP_S / 0.0005;   /* on the 2 kHz scale */
-                    char m[220], b1[16], b2[24], b3[24];
-                    const char *fr = "-", *ez_s = "-", *dc_s = "-";
-                    if (t_prev > 0) {
-                        double dt = (tt - t_prev) * REF_CAP_S;             /* OCXO seconds between two GPS seconds */
-                        if (dt > 0.9 && dt < 1.1) fr = f1(b1, (1.0 - dt) * 1e9, 1);   /* > 0: OCXO slow */
-                    }
-                    t_prev = tt;
-                    {   /* phase of this pulse within the OCXO second: unwrapped, glitches (> 10 us step) dropped */
-                        double ph = fmod(tt * REF_CAP_S, 1.0);
-                        if (gps_have) {
-                            double st = -(ph - gps_ph_prev);
-                            st -= floor(st + 0.5);                 /* to -0.5 .. 0.5 s */
-                            /* phase jump check per PULSE (review 3: the minute-mean check in efc.c missed a 550 ns
-                               step landing mid-minute - the minute means split it). Normal steps differ from their
-                               running mean by the pulse jitter (~20 ns rms, NEO-7P); a step > GPS_SEC_JUMP, or a
-                               glitch > 10 us after a settled run, marks this minute -> efc suspends the GPS */
-                            if (gps_st_n >= 5 && fabs(st - gps_st_avg) > GPS_SEC_JUMP) gps_jump = 1;
-                            else if (fabs(st) < 1e-5) { gps_st_avg += (st - gps_st_avg) * (gps_st_n < 10 ? 1.0 / (gps_st_n + 1) : 0.1); gps_st_n++; }
-                            if (fabs(st) < 1e-5) { gps_xun += st; gps_xsum += gps_xun; gps_n++; gps_ph_prev = ph; }
-                            else gps_have = 0;                     /* start again at the next pulse */
-                        } else { gps_have = 1; gps_ph_prev = ph; }
-                    }
-                    uint32_t sec, us;
-                    if (tk.synced && tk_time(&tk, (int64_t)(n2 * (TICKS_PER_BLOCK / 4)), &sec, &us)) {
-                        double ms = us / 1000.0; if (ms >= 500) ms -= 1000;     /* > 0: e-CzasPL clock ahead */
-                        ez_s = f3(b2, ms);
-                    }
-                    if (dcf.have_mark) {
-                        double start = (double)(((uint64_t)n2 - dcf.mark) / 2000 * 2000 + dcf.mark) + (dcf.pm_sigma > DCF_PM_MIN ? dcf.pm_lag_ms * 2.0 : (double)dcf.mark_frac);
-                        double x = fmod(n2 - start, 2000.0); if (x < 0) x += 2000; if (x >= 1000) x -= 2000;
-                        dc_s = f3(b3, x / 2.0);                            /* > 0: the DCF77 second began before the GPS second */
-                    }
-                    snprintf(m, sizeof m, "PPS #%lu | OCXO %s ppb (1 s) | e-CzasPL clock %s ms | DCF77 second %s ms%s",
-                             (unsigned long)n_pps, fr, ez_s, dc_s, dcf.pm_sigma > DCF_PM_MIN ? " (phase code)" : " (second mark)");
-                    put_line("GPS", m);
-                }
-            }
-#endif
             {   /* hourly statistics: expected minutes, hour change */
                 uint32_t sec;
                 if (tk.synced && tk_time(&tk, now_tick(), &sec, 0)) {
