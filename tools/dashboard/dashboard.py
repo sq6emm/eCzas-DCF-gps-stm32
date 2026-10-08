@@ -31,6 +31,10 @@ STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")   # 
 SLOPE_PPB, CODE_REF = 0.816, 2252.5     # EFC slope [ppb/code] (measured 28 Sep) and the reference code
 RANGES = {"6": 6, "24": 24, "72": 72, "all": None}
 
+def legend(ax, **kw):
+    """a legend only when something with a label was drawn (a range without data: no matplotlib warning)"""
+    if ax.get_legend_handles_labels()[0]: ax.legend(**kw)
+
 NUM = r"([-+]?\d+(?:\.\d+)?|-)"
 P_REFS = re.compile(r"^(\S+?)\+00:00 .*\] REFS +GPS " + NUM + r" ppb, phase " + NUM + r" ns \((\d+) pulses\) \| DCF77 "
                     + NUM + r" ppb \| e-CzasPL " + NUM + r" ppb(.*)$")
@@ -234,7 +238,7 @@ def render(rng):
             if len(v) > 10:
                 lo, hi = np.percentile(v, [1, 99]); pad = 0.3 * (hi - lo) + 0.2; ax.set_ylim(lo - pad, hi + pad)
         ax.axhline(0, color="k", lw=0.8)
-        ax.set_ylabel("ppb"); ax.grid(alpha=0.3); ax.legend(loc="upper left", fontsize=8)
+        ax.set_ylabel("ppb"); ax.grid(alpha=0.3); legend(ax, loc="upper left", fontsize=8)
         ax.set_title(f"{name} carrier frequency - GPS: {stat_line(y)}", fontsize=10, loc="left")
     axs[1].xaxis.set_major_formatter(xfmt); fig.autofmt_xdate()
     site_legend(fig)
@@ -261,7 +265,8 @@ def render(rng):
         else:
             ax.set_title(f"{name} second vs GPS: no data", fontsize=10, loc="left")
         for b_ in bl2: ax.axvline(b_, color="0.5", ls=":", lw=1)
-        ax.set_ylabel("ms"); ax.grid(alpha=0.3); ax.legend(loc="lower left", fontsize=8)
+        ax.set_ylabel("ms"); ax.grid(alpha=0.3)
+        legend(ax, loc="lower left", fontsize=8)
     axs[1].xaxis.set_major_formatter(xfmt); fig.autofmt_xdate()
     site_legend(fig)
     out["time"] = png(fig)
@@ -274,7 +279,7 @@ def render(rng):
         tt, aa = adev(keys, y, taus)
         if tt: ax.loglog(np.array(tt) * 60, np.array(aa) * 1e-9, "o-", ms=4, color=col, label=name)
     ax.set_xlabel("averaging time tau [s]"); ax.set_ylabel("Allan deviation (fractional)")
-    ax.grid(True, which="both", alpha=0.3); ax.legend(fontsize=9)
+    ax.grid(True, which="both", alpha=0.3); legend(ax, fontsize=9)
     sec = ax.secondary_yaxis("right", functions=(lambda x: x * 1e9, lambda x: x * 1e-9)); sec.set_ylabel("ppb")
     ax.set_title("Frequency stability against the GPS PPS (overlapping Allan deviation of the minute frequencies)", fontsize=10, loc="left")
     out["adev"] = png(fig)
@@ -290,7 +295,7 @@ def render(rng):
         v = ph[~np.isnan(ph)]
         if len(v) > 10:
             lo, hi = np.percentile(v, [0.5, 99.5]); pad = 0.2 * (hi - lo) + 10; ax.set_ylim(lo - pad, hi + pad)
-    ax.set_ylabel("ns"); ax.grid(alpha=0.3); ax.legend(loc="upper left", fontsize=8)
+    ax.set_ylabel("ns"); ax.grid(alpha=0.3); legend(ax, loc="upper left", fontsize=8)
     ax.xaxis.set_major_formatter(xfmt); fig.autofmt_xdate()
     ax.set_title("OCXO time error against GPS", fontsize=10, loc="left")
     site_legend(fig)
@@ -302,7 +307,7 @@ def render(rng):
     if len(t):
         ax.plot(t, free, ".", ms=2.5, color="tab:purple", alpha=0.35, label=f"OCXO vs GPS at EFC code {CODE_REF} (1-min)")
         ax.plot(t, rolling(free), "-", lw=1.6, color="tab:purple", label="10-min mean")
-    ax.set_ylabel("ppb"); ax.grid(alpha=0.3); ax.legend(loc="upper left", fontsize=8)
+    ax.set_ylabel("ppb"); ax.grid(alpha=0.3); legend(ax, loc="upper left", fontsize=8)
     ax.xaxis.set_major_formatter(xfmt); fig.autofmt_xdate()
     ax.set_title("OCXO free-running frequency (GPS-measured frequency + EFC slope x code offset; > 0: slow)", fontsize=10, loc="left")
     site_legend(fig)
