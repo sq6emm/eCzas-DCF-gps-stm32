@@ -103,12 +103,15 @@ def load_block(tm, u0, u1):
     z = np.zeros(n_hi - n_lo, complex); good = np.zeros(n_hi - n_lo, bool)
     for fn in sorted(glob.glob(os.path.join(LOG, "dcf_*.c64"))):
         idx = np.loadtxt(fn.replace(".c64", ".idx.csv"), delimiter=",", skiprows=1, ndmin=2)
-        if len(idx) == 0 or idx[-1, 0] + 200 < n_lo or idx[0, 0] > n_hi: continue
-        if idx[0, 0] > idx[-1, 0]: continue
+        if len(idx) == 0 or idx[:, 1].max() < u0 - 900 or idx[:, 1].min() > u1 + 900: continue
+        if idx[:, 0].max() + 200 < n_lo or idx[:, 0].min() > n_hi: continue
         raw = np.fromfile(fn, dtype="<f4")
         for k in range(min(len(idx), len(raw) // 400)):
             n0 = int(idx[k, 0])
             if n0 + 200 <= n_lo or n0 >= n_hi: continue
+            # the sample count restarts at every boot: a packet of another boot (a file can span a
+            # reboot) has the same numbers at another host time - take only this boot's
+            if abs(idx[k, 1] - np.polyval(p, n0 / FS)) > 30: continue
             v = raw[400 * k:400 * k + 400]; zz = v[0::2] + 1j * v[1::2]
             a, b = max(n0, n_lo), min(n0 + 200, n_hi)
             z[a - n_lo:b - n_lo] = zz[a - n0:b - n0]; good[a - n_lo:b - n_lo] = True
