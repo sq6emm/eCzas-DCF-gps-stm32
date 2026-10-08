@@ -53,7 +53,7 @@ void coh_init(coh_trk_t *t, const coh_cfg_t *cfg)
 {
     memset(t, 0, sizeof *t);
     t->c = *cfg;
-    t->lvl0 = -45.0f / 360;
+    t->lvl0 = -35.0f / 360;               /* the level measured on the air (8 Oct 2026: -34 deg) */
     start_search(t);
 }
 
@@ -136,13 +136,15 @@ int coh_push(coh_trk_t *t, float re, float im, float *dr, float *di, float *ir, 
         if (t->c.mode == COH_ECZAS) {
             /* decision-directed on the two data levels (idle / bit 1 = 0, bit 0 = lvl0).
              * lvl0 is learned from bit centres only: the 16 ms slews between the levels
-             * would pull it towards 0 and the loop would then follow the data. Only while the loop is
-             * quiet (< 8 deg): with more noise the decisions are biased (the idle level's tail, the
-             * window's edge) and lvl0 ran to the -60 deg clamp (rx.log: -52..-54 deg at 12-18 deg noise,
-             * -34 deg true); then only coh_level_hint (decoded frames) moves it. */
+             * would pull it towards 0 and the loop would then follow the data. Learned up to 15 deg of
+             * loop noise: a review (Oct 2026) saw it run to the -60 deg clamp at low C/N0 and the gate
+             * was cut to 8 deg - which cost decoded frames: host/cohsim on 6 h of the NUCLEO's dumps with
+             * noise added, decoded + confirmed at 5 dB 1615 (15 deg) vs 1026 (8 deg), at 0 dB 981 vs 352,
+             * and after a start with the level off it locked out the learning (22:08 boot: first frame
+             * after 64 s). Kept at 15 deg; the more negative level does not hurt the decoding. */
             if (ph < t->lvl0 / 2) {
                 e = ph - t->lvl0;
-                if (t->state == COH_TRACK && t->err_avg * 360 < 8.0f && ph < t->lvl0 * 0.75f) {
+                if (t->state == COH_TRACK && t->err_avg * 360 < 15.0f && ph < t->lvl0 * 0.75f) {
                     t->lvl0 += e * (1.0f / 256);
                     if (t->lvl0 > -20.0f / 360) t->lvl0 = -20.0f / 360;     /* the range coh_level_hint accepts */
                     if (t->lvl0 < -60.0f / 360) t->lvl0 = -60.0f / 360;
