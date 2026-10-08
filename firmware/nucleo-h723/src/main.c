@@ -547,8 +547,24 @@ static dcf_t dcf;
 static dcfbits_t dcfb;                     /* DCF77 time code, every minute */
 static int dcf_blocks_locked, dcf_line_proven, dcf_pm_said; static float dcf_line_hz = 1e9f;
 #ifndef OCXO_REF
-static uint64_t dcf_excl_t[4];             /* n2k of each rejected carrier, in coh's exclusion order */
-#define DCF_EXCL_KEEP (6ULL * 3600 * 2000)  /* a rejection is forgotten after 6 h */
+/* LSE build (the carriers can be anywhere in the search): a tracker's rejected lines, each allowed
+   again 6 h after it was rejected (a spur gone, or a carrier rejected by mistake) */
+typedef struct { uint64_t t[4]; } rej_t;   /* n2k of each rejection, in coh's exclusion order */
+static rej_t rej_d, rej_e;
+#define REJ_KEEP (6ULL * 3600 * 2000)
+static void reject_line(coh_trk_t *k, rej_t *r)
+{
+    if (k->n_excl == 4) memmove(r->t, r->t + 1, 3 * sizeof *r->t);
+    r->t[k->n_excl < 4 ? k->n_excl : 3] = n2k;
+    coh_reject(k, 0.05f);
+}
+static void forget_rejected(coh_trk_t *k, rej_t *r, const char *tag)
+{
+    if (k->n_excl && n2k >= r->t[0] + REJ_KEEP) {
+        coh_forget_oldest(k); memmove(r->t, r->t + 1, 3 * sizeof *r->t);
+        put_line(tag, "a carrier rejected 6 h ago is allowed again");
+    }
+}
 #endif
 /* DCF77 counts as locked only when the tracked line also carries confirmed second marks
    (a local spur can be tracked, but it has no 1-s amplitude pattern) */
@@ -741,18 +757,12 @@ static void station_samples(float er, float ei, float dr, float di)
             char m[100], b1[16];
             snprintf(m, sizeof m, "carrier at %s Hz has no second marks - rejected for 6 h, searching", f3(b1, trk_d.hz));
             put_line("DCF77", m);
-            if (trk_d.n_excl == 4) memmove(dcf_excl_t, dcf_excl_t + 1, 3 * sizeof *dcf_excl_t);
-            dcf_excl_t[trk_d.n_excl < 4 ? trk_d.n_excl : 3] = n2k;
-            coh_reject(&trk_d, 0.05f);
+            reject_line(&trk_d, &rej_d);
             dcf_new_line();
 #endif
         }
 #ifndef OCXO_REF
-        if (trk_d.n_excl && n2k >= dcf_excl_t[0] + DCF_EXCL_KEEP) {
-            coh_forget_oldest(&trk_d);
-            memmove(dcf_excl_t, dcf_excl_t + 1, 3 * sizeof *dcf_excl_t);
-            put_line("DCF77", "a carrier rejected 6 h ago is allowed again");
-        }
+        forget_rejected(&trk_d, &rej_d, "DCF77");
 #endif
         dcf_report();
     }
@@ -1022,7 +1032,11 @@ int main(void)
     }
     {
         /* same tracker code, per-station settings (see common/coh.h) */
+#ifdef OCXO_REF   /* the carriers are within mHz of 0 Hz on the OCXO: e-CzasPL searched +-2 Hz only (no spur) */
+        static const coh_cfg_t ce = { COH_ECZAS, 4, 3.0f, 1.0f, 1500, 4, 1024, 2.0f, 25.0f, 30.0f };
+#else
         static const coh_cfg_t ce = { COH_ECZAS, 4, 3.0f, 1.0f, 1500, 4, 1024, 40.0f, 25.0f, 30.0f };
+#endif
 #ifdef OCXO_REF   /* DCF77 within mHz of 0 Hz: search +-0.2 Hz only (a local spur sits at -1.6 Hz) */
         static const coh_cfg_t cd = { COH_PLAIN, 20000, 0.03f, 0.01f, 6, 500, 512, 0.2f, 40.0f, 600.0f };
 #else
@@ -1177,6 +1191,20 @@ int main(void)
             next_s += 2000;
             blk_ratio_sum = 0; blk_ratio_n = 0;
             tk_maintain(&tk, now_tick());
+#ifndef OCXO_REF
+            {   /* e-CzasPL: a line tracked for 60 min without a single frame is not e-CzasPL (a spur:
+                   no modulation, so the loop is quiet and stays "locked") - reject it for 6 h */
+                static uint32_t seen; static uint64_t since;
+                if (n_heard != seen || trk_e.state != COH_TRACK) { seen = n_heard; since = n2k; }
+                else if (n2k - since > 60ULL * 60 * 2000) {
+                    char m[80], b1[16];
+                    snprintf(m, sizeof m, "carrier at %s Hz without frames for 60 min - rejected for 6 h, searching", f1(b1, trk_e.hz, 1));
+                    put_line("eCzas", m);
+                    reject_line(&trk_e, &rej_e); since = n2k;
+                }
+                forget_rejected(&trk_e, &rej_e, "eCzas");
+            }
+#endif
             {   /* hourly statistics: expected minutes, hour change */
                 uint32_t sec;
                 if (tk.synced && tk_time(&tk, now_tick(), &sec, 0)) {

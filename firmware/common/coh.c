@@ -136,12 +136,15 @@ int coh_push(coh_trk_t *t, float re, float im, float *dr, float *di, float *ir, 
         if (t->c.mode == COH_ECZAS) {
             /* decision-directed on the two data levels (idle / bit 1 = 0, bit 0 = lvl0).
              * lvl0 is learned from bit centres only: the 16 ms slews between the levels
-             * would pull it towards 0 and the loop would then follow the data. */
+             * would pull it towards 0 and the loop would then follow the data. Only while the loop is
+             * quiet (< 8 deg): with more noise the decisions are biased (the idle level's tail, the
+             * window's edge) and lvl0 ran to the -60 deg clamp (rx.log: -52..-54 deg at 12-18 deg noise,
+             * -34 deg true); then only coh_level_hint (decoded frames) moves it. */
             if (ph < t->lvl0 / 2) {
                 e = ph - t->lvl0;
-                if (t->state == COH_TRACK && t->err_avg * 360 < 15.0f && ph < t->lvl0 * 0.75f) {
-                    t->lvl0 += (ph - t->lvl0) * (1.0f / 256);
-                    if (t->lvl0 > -30.0f / 360) t->lvl0 = -30.0f / 360;
+                if (t->state == COH_TRACK && t->err_avg * 360 < 8.0f && ph < t->lvl0 * 0.75f) {
+                    t->lvl0 += e * (1.0f / 256);
+                    if (t->lvl0 > -20.0f / 360) t->lvl0 = -20.0f / 360;     /* the range coh_level_hint accepts */
                     if (t->lvl0 < -60.0f / 360) t->lvl0 = -60.0f / 360;
                 }
             } else e = ph;
