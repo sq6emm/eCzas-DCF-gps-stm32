@@ -984,6 +984,22 @@ int main(void)
     clock_init();
     gpio_uart_init();
     uart_puts("\r\n\r\ne-CzasPL + DCF77 receiver on NUCLEO-H723ZG (M3: coherent, two independent stations)\r\n");
+    {   /* why this start: the reset flags, and a fault recorded before the reset (stm32h7xx_it.c) */
+        extern uint32_t fault_rec[3];
+        static const char *FN[] = { "?", "HardFault", "MemManage", "BusFault", "UsageFault", "NMI" };
+        uint32_t r = RCC->RSR;
+        const char *why = r & RCC_RSR_IWDG1RSTF ? "watchdog (main loop stalled)" : r & RCC_RSR_WWDG1RSTF ? "window watchdog" :
+                          r & RCC_RSR_LPWRRSTF ? "low-power" : r & RCC_RSR_SFTRSTF ? "software" : r & RCC_RSR_PORRSTF ? "power-on" :
+                          r & RCC_RSR_BORRSTF ? "brown-out" : r & RCC_RSR_PINRSTF ? "reset pin" : "unknown";
+        snprintf(m, sizeof m, "reset: %s\r\n", why);
+        uart_puts(m);
+        if (fault_rec[0] == 0xFA017ED0 && fault_rec[1] < 6) {
+            snprintf(m, sizeof m, "reset after a %s at PC 0x%08lx\r\n", FN[fault_rec[1]], (unsigned long)fault_rec[2]);
+            uart_puts(m);
+        }
+        fault_rec[0] = 0;
+        RCC->RSR |= RCC_RSR_RMVF;
+    }
     {
         /* same tracker code, per-station settings (see common/coh.h) */
         static const coh_cfg_t ce = { COH_ECZAS, 4, 3.0f, 1.0f, 1500, 4, 1024, 40.0f, 25.0f, 30.0f };
@@ -1021,6 +1037,12 @@ int main(void)
 
     float mean = 32768.0f, mean2 = 32768.0f;
     uint64_t next_s = 2000, next_status = 20000, next_carrier = 120000;
+    /* watchdog: a block is processed every 5 ms; 4 s without one (a hang, the DMA stopped) resets.
+       LSI ~32 kHz / 64 x 2000; stopped while a debugger halts the core */
+    DBGMCU->APB4FZ1 |= DBGMCU_APB4FZ1_DBG_IWDG1;
+    IWDG1->KR = 0xCCCC; IWDG1->KR = 0x5555; IWDG1->PR = 4; IWDG1->RLR = 2000;
+    while (IWDG1->SR) {}
+    IWDG1->KR = 0xAAAA;
     uint64_t rd = samples_written() / BLOCK * BLOCK;   /* next sample to process (the ADC ran during the start) */
     uint32_t glitches = ref_glitches;
     for (;;) {
@@ -1035,6 +1057,7 @@ int main(void)
             overruns++;
             for (uint64_t to = (wr / BLOCK - 1) * BLOCK; rd < to; ) { rd += BLOCK; block_timing(rd); process_block(NULL, mean, mean2); }
         }
+        IWDG1->KR = 0xAAAA;               /* watchdog: a block is being processed */
         uint32_t c0 = DWT->CYCCNT;
         const uint32_t *b = adc_buf + (rd / BLOCK % RING_BLK) * BLOCK;
         {

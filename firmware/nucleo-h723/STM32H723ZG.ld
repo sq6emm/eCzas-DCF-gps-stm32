@@ -24,6 +24,8 @@ SECTIONS
   _sidata = LOADADDR(.data);
   .data : { . = ALIGN(4); _sdata = .; *(.data) *(.data*) . = ALIGN(4); _edata = .; } >RAM_D1 AT> FLASH
   .bss : { . = ALIGN(4); _sbss = .; __bss_start__ = _sbss; *(.bss) *(.bss*) *(COMMON) . = ALIGN(4); _ebss = .; __bss_end__ = _ebss; } >RAM_D1
+  /* kept over a reset (not zeroed): the fault record */
+  .noinit (NOLOAD) : { . = ALIGN(4); *(.noinit) *(.noinit*) . = ALIGN(4); } >RAM_D1
   /* CPU-only buffers (not reachable by DMA1/2): the spectrum diagnostic (common/spec.c); not zeroed at boot */
   .dtcm (NOLOAD) : { . = ALIGN(8); _sdtcm = .; *(.dtcm) *(.dtcm*) . = ALIGN(8); _edtcm = .; } >DTCMRAM
   ASSERT(_estack - _edtcm >= 32K, "DTCM: less than 32 KB left for the stack")
