@@ -88,14 +88,15 @@ static uint32_t n_heard, n_decoded, n_conf, n_rej;
 #define TXR 16384
 static uint8_t txr[TXR];
 static volatile uint32_t tx_head, tx_tail, tx_drops;
-static void uart_write(const void *d, uint32_t n)
+static void uart_write_keep(const void *d, uint32_t n, uint32_t keep)   /* keep: bytes left free for others */
 {
     const uint8_t *p = d;
-    if (TXR - 1 - (tx_head - tx_tail) < n) { tx_drops++; return; }   /* all or nothing */
+    if (TXR - 1 - (tx_head - tx_tail) < n + keep) { tx_drops++; return; }   /* all or nothing */
     for (uint32_t i = 0; i < n; i++) txr[(tx_head + i) % TXR] = p[i];
     __DMB(); tx_head += n;
     USART3->CR1 |= USART_CR1_TXEIE_TXFNFIE;
 }
+static void uart_write(const void *d, uint32_t n) { uart_write_keep(d, n, 0); }
 void USART3_IRQHandler(void)
 {
     while ((USART3->ISR & USART_ISR_TXE_TXFNF) && tx_tail != tx_head) { USART3->TDR = txr[tx_tail % TXR]; tx_tail++; }
@@ -604,7 +605,7 @@ static void dump(uint8_t type, float zr, float zi)
     pk[w].x[2 * pn[w]] = zr; pk[w].x[2 * pn[w] + 1] = zi;
     if (++pn[w] == 200) {
         pk[w].crc = crc16((const uint8_t *)&pk[w].n0, sizeof pk[w].n0 + sizeof pk[w].x);
-        uart_write(&pk[w], sizeof pk[w]); pn[w] = 0;
+        uart_write_keep(&pk[w], sizeof pk[w], 2048); pn[w] = 0;   /* text lines go first when the link is full */
     }
 }
 #endif
