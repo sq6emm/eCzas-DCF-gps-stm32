@@ -1004,7 +1004,7 @@ static void dcf_report(void)
 /* ---------------------------------------------------------------- main */
 int main(void)
 {
-    char m[420], b1[16], b2[16], b3[16];
+    char m[456], b1[16], b2[16], b3[16];    /* the longest message put_line's 480 bytes carry */
     SCB_EnableICache();
     SCB_EnableDCache();
     HAL_Init();
@@ -1319,8 +1319,8 @@ int main(void)
                      (unsigned long)(max_lag / 1000), lroundf(adc_mean1), (unsigned long)adc_min1, (unsigned long)adc_max1,
                      lroundf(adc_mean2), (unsigned long)adc_min2, (unsigned long)adc_max2,
                      overruns ? " OVERRUN" : "");
-            if (pl_bad) { strcat(m, " PLBAD"); pl_bad = 0; }
-            if (ez.cand_overrun) { strcat(m, " CANDOVR"); ez.cand_overrun = 0; }   /* a frame candidate came before the last was handled */
+            if (pl_bad) { strncat(m, " PLBAD", sizeof m - strlen(m) - 1); pl_bad = 0; }
+            if (ez.cand_overrun) { strncat(m, " CANDOVR", sizeof m - strlen(m) - 1); ez.cand_overrun = 0; }   /* a frame candidate came before the last was handled */
             {   /* output lost because the TX ring was full */
                 static uint32_t drops_seen;
                 uint32_t dr = tx_drops;
