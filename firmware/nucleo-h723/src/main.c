@@ -94,13 +94,15 @@ static void uart_write_keep(const void *d, uint32_t n, uint32_t keep)   /* keep:
     if (TXR - 1 - (tx_head - tx_tail) < n + keep) { tx_drops++; return; }   /* all or nothing */
     for (uint32_t i = 0; i < n; i++) txr[(tx_head + i) % TXR] = p[i];
     __DMB(); tx_head += n;
-    USART3->CR1 |= USART_CR1_TXEIE_TXFNFIE;
+    USART3->CR3 |= USART_CR3_TXFTIE;          /* TX FIFO half empty -> refill (as the HAL's FIFO mode) */
 }
 static void uart_write(const void *d, uint32_t n) { uart_write_keep(d, n, 0); }
+/* the 16-byte TX FIFO is refilled when half empty: one interrupt per ~8 bytes instead of per byte
+   (~92k interrupts/s at 921600 baud before, ~1.5 % CPU) */
 void USART3_IRQHandler(void)
 {
     while ((USART3->ISR & USART_ISR_TXE_TXFNF) && tx_tail != tx_head) { USART3->TDR = txr[tx_tail % TXR]; tx_tail++; }
-    if (tx_tail == tx_head) USART3->CR1 &= ~USART_CR1_TXEIE_TXFNFIE;
+    if (tx_tail == tx_head) USART3->CR3 &= ~USART_CR3_TXFTIE;
 }
 static void uart_puts(const char *s) { uart_write(s, strlen(s)); }
 static const char *f1(char *b, double v, int plus)
@@ -214,6 +216,8 @@ static void gpio_uart_init(void)
     huart3.Init.Mode = UART_MODE_TX_RX; huart3.Init.HwFlowCtl = UART_HWCONTROL_NONE;
     huart3.Init.OverSampling = UART_OVERSAMPLING_16;
     HAL_UART_Init(&huart3);
+    HAL_UARTEx_SetTxFifoThreshold(&huart3, UART_TXFIFO_THRESHOLD_1_2);
+    HAL_UARTEx_EnableFifoMode(&huart3);
     HAL_NVIC_SetPriority(USART3_IRQn, 2, 0); HAL_NVIC_EnableIRQ(USART3_IRQn);
 }
 
