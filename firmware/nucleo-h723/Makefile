@@ -10,7 +10,8 @@ DEV   = $(LIB)/cmsis_device_h7
 CORE  = $(LIB)/CMSIS_5/CMSIS/Core/Include
 CC    = arm-none-eabi-gcc
 CPU   = -mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard
-CFLAGS = $(CFLAGS_EXTRA) $(CPU) -O2 -g -Wall -ffunction-sections -fdata-sections -DSTM32H723xx -DUSE_HAL_DRIVER \
+# TK_PAIR_PPM: the eCzas core's frame-pair tolerance (20 ms + this); the 2 kHz scale here is true time
+CFLAGS = $(CFLAGS_EXTRA) $(CPU) -O2 -g -Wall -ffunction-sections -fdata-sections -DSTM32H723xx -DUSE_HAL_DRIVER -DTK_PAIR_PPM=10 \
          -Isrc -I$(COMMON) -I$(ECZAS) -I$(HAL)/Inc -I$(DEV)/Include -I$(CORE)
 DEPFLAGS = -MMD -MP                     # header dependencies (build/*.d)
 LDFLAGS = $(CPU) -T STM32H723ZG.ld --specs=nano.specs --specs=nosys.specs -Wl,--gc-sections -Wl,-Map=build/rx.map -Wl,--print-memory-usage
