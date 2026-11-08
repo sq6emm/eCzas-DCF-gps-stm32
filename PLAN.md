@@ -39,6 +39,12 @@ access more is possible:
 
 ## 3. Clock: OCXO
 
+**Status (Nov 2026):** done differently from the plan below. A 10 MHz OCXO (CTI OSC5A2B02,
+5 V HCMOS) drives PA0 through 1k/2k; its edges are captured and the receiver's time scale
+and mixers are computed against it (the CPU stays on its own clock). EFC comes from the
+internal 12-bit DAC on PA5 with dither (0.816 ppb per code), which proved fine for a
+GPS-locked loop (time error tens of ns). The text below is the original plan.
+
 - The Nucleo has **no HSE crystal** (X3 is an empty footprint); the default HSE is the
   ST-LINK's MCO, measured ~0.9 % off and wandering ±700 ppm. Today the CPU runs on
   HSI and the 32.768 kHz LSE crystal (X2) is the time reference (+0.9…1.0 ppm,
@@ -59,6 +65,10 @@ access more is possible:
 
 ## 4. GPS
 
+**Status (Nov 2026):** a u-blox NEO-7P (navigation module, stationary mode, time pulse only
+when locked, 25 ns cable delay) on USB, PPS directly on PC8 (TIM3_CH3). Its pulse jitter is
+~15–20 ns, which the 600 s loop averages; a timing receiver (ZED-F9T) would still be better.
+
 - A **timing** receiver: survey-in / fixed position, qErr (`UBX-TIM-TP`) sawtooth
   correction, PPS into a 32-bit timer capture (5 ns at 200 MHz).
 - **u-blox NEO-M8T / LEA-M8T** (~20 ns, sawtooth-correctable): enough, because e-CzasPL
@@ -67,6 +77,13 @@ access more is possible:
 - Active antenna with sky view (L1, or L1/L5 / L1/L2 for the F9T).
 
 ## 5. Disciplining
+
+**Status (Nov 2026):** `common/efc.c` `efc_minute3`: PI phase lock to the GPS PPS (600 s)
+with a plausibility gate (phase jump per pulse > 300 ns, or GPS frequency vs both stations
+> 10 ppb over 10 min, each station minus its learned offset) -> GPS suspended, 60 min
+holdover, then DCF77 / e-CzasPL (adaptive time constant). Tested with
+`firmware/host/efcgpssim` (spoofed steps and ramps, outages, cold start) and
+`efcgpsreplay` on real data. Results: [doc/RESULTS.md](doc/RESULTS.md).
 
 | reference | best at | weakness |
 |---|---|---|

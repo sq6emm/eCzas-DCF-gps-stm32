@@ -170,3 +170,73 @@ little or no reference; the NUCLEO column is then its own count against ~290 fra
 - Carrier: 38 one-minute values of eCzas−DCF77 give **−0.5 ± 3.1 ppb**. Both carriers were
   measured against the same LSE crystal, so its error cancels: the two transmitters agree within
   about 3 ppb.
+
+## GPS-disciplined OCXO (from 1 Oct 2026)
+
+Firmware 67714e4 (1 Oct 18:00 UTC) locked the OCXO to the NEO-7P PPS; b6119ed added the
+plausibility gate; 345584c (2 Oct) fixed three issues found in an independent review
+(GPS jump checked per pulse, unbiased DCF77 phase-code peak, true ADC rate in the first
+block, implausible e-CzasPL decodes ignored); later commits (8 Oct) hardened the time
+base, watchdog and DCF77 fade recovery.
+
+- **Lock:** time error against GPS 16–31 ns rms in quiet periods. The gate never
+  suspended the GPS on real data; in simulation it catches a spoofed 550 ns step at any
+  second of the minute and a +20 ppb frequency spoof at once.
+- **OCXO episode 1 Oct 20:13 – 2 Oct 03:20:** the free-running frequency stepped −3.5 ppb
+  with abrupt ~1-min jumps (EFC code unchanged, all three references agreed), then
+  returned; time error up to ~1.1 µs while the loop followed. Hardware (EFC / ground /
+  supply contact), not firmware.
+
+## Carriers against GPS (Oct–Nov 2026)
+
+Per minute from the `REFS` lines (`tools/carriers_vs_gps.py`; carrier − GPS):
+
+| | offset | notes |
+|---|---|---|
+| DCF77 | 0.00 ppb | ADEV 1 h ~0.2 ppb on the rod, noisier at night |
+| e-CzasPL | −0.80 ppb | daily means −0.75 … −0.83 ppb, 2–21 Oct |
+
+**Against GUM's own monitoring** (received carrier phase vs UTC(PL), every 20 s,
+20.10–02.11, shared by GUM; unwrapped with x2 − x1 + n · 4.444 µs):
+
+- GUM: −0.806 ppb (5-s data −0.804), daily −0.822 … −0.791; 4–5 Nov −0.782 ppb.
+- Ours (GPS, Wrocław) agrees within a few 1e-11 on clean days; from the carrier phase
+  within ~0.5e-11. Local interference (28–30 Oct, 5 Nov) biased our minute values;
+  robust (clipped) daily means are needed.
+- Allan deviation from GUM's data (whole path, incl. frame modulation and propagation):
+  1.2e-8 @ 20 s, 8e-11 @ 1 h, 1.0e-11 @ 9 h, ~6e-12 @ 1 d.
+- GUM: the carrier and the frame timing come from one free-running OCXO for now
+  (spec ±2e-9), rubidium planned (Nov–Dec 2026, spec ±5e-11).
+
+## e-CzasPL second against GPS
+
+Second = start of the frame's first ~19 ms phase ramp = start of the 16-bit sync
+(confirmed by GUM, 2 Oct 2026), ECZ_TEMPLATE_LAG_US −1380; propagation 229.3 km =
+0.765 ms removed.
+
+- 2 Oct: 10.6 ms late; growing **+0.074 ms/day** (the −0.80 ppb carrier predicts
+  +0.070 ms/day: one OCXO drives both) to 12.1 ms on 21 Oct.
+- 21 Oct 06:33:43 UTC: step −10.8 ms (GUM resynchronised via an NTP server) to 1.4 ms
+  late; 2.3 ms on 2 Nov; a −0.17 ms change during our outage on 2/3 Nov (cause open);
+  ~2.2 ms on 4 Nov. GUM declares ±10 ms vs UTC(PL).
+- DCF77 second at its transmitter (573.2 km = 1.912 ms removed): +0.19 … +0.25 ms after
+  345584c, rising after sunset; the residual (rod group delay, night propagation) is open.
+- TDF (IC-7610, night 1–2 Oct, transferred to GPS through the NUCLEO's e-CzasPL):
+  +0.16 ms, incl. ~0.07 ms of night sky wave.
+
+## Early e-CzasPL time frames
+
+The time frame belonging to slot S+3 was sometimes sent in slot S, 0.50–0.60 s after its
+start (2.40–2.50 s early, in exact 20 ms steps), S+3 then empty. 97 events 25 Sep – 2 Oct
+on five receivers; 88 confirmed in raw recordings with an independent decoder written
+from GUM's frame description; ~1 in 400 time frames, Poisson in time, no dependence on
+the hour, the minute or the preceding transmission. Report:
+`tools/dashboard/static/early_frames.html`. GUM reduced the frame lead to the modulator
+by 0.2 s on 4 Nov 2026 ~12:00 UTC; the last early frame was 4 Nov 10:06:30 UTC
+(0 in the next ~6,170 frames where ~15 were expected).
+
+## Local interference at the Wrocław site
+
+5 Nov from ~08:40–08:50 UTC (and weaker, intermittent on 28–30 Oct): noise up to
++12–16 dB around 222, 225 and 231 kHz on the e-CzasPL rod (DCF77 band unaffected),
+C/N0 45 → ~35 dB-Hz, decoding stopped from ~09:20. Weekday daytime; source not found yet.
