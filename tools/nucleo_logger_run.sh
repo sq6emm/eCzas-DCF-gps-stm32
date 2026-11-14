@@ -16,6 +16,7 @@ ROTATE='while true; do
 done'
 CMD='nice -n 19 ionice -c3 sh -c "$ROTATE" &
 while true; do python3 -u /p/rx/nucleo_logger.py /dev/serial/by-id/usb-STMicroelectronics_STLINK-V3_002B00273331510633323639-if02 921600 /p/log; echo "$(date -u +%FT%T) logger exited $?, reopening in 5 s"; sleep 5; done'
+echo "NOTE: nucleo-logger is now managed by /etc/docker-compose/claude/nucleo (docker compose up -d); this script is kept for reference" >&2
 docker rm -f nucleo-logger >/dev/null 2>&1
 docker run -d --restart unless-stopped --label owner=claude --name nucleo-logger --user 1001:1001 --group-add 20 \
   -v /data/claude/nucleo-h723:/p -v /dev:/dev --device-cgroup-rule 'c 166:* rmw' \

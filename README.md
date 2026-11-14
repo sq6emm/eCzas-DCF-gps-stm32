@@ -68,7 +68,7 @@ git clone --recurse-submodules git@github.com:sq6emm/eCzas-DCF-gps-stm32.git
 | `tools/carriers_vs_gps.py` | DCF77 and e-CzasPL carrier frequency against GPS from the `REFS` lines: offset, scatter, Allan deviation, day/night, hourly (container `carriers-vs-gps`) |
 | `tools/gps_monitor.py` | GPS receiver status every second (NAV-STATUS, NAV-TIMEUTC, TIM-TP, GGA): lock, satellites, tAcc, qErr; alerts on lock lost (container `gps-monitor`) |
 | `tools/gps_calib.py` | e-CzasPL and DCF77 seconds against the GPS PPS from the `GPS PPS` lines |
-| `tools/dashboard/` | web page (container `nucleo-dashboard`, port 8077): charts from `rx.log`, static early-frame report in `static/` |
+| `tools/dashboard/` | web page (container `nucleo-dashboard`, port 8077; the whole receiver stack runs from `/etc/docker-compose/claude/nucleo/compose.yml` on the server): charts from `rx.log`, static early-frame report in `static/` |
 | `tools/efc_replay_extract.py` | per-minute OCXO-loop inputs from a log, for `firmware/host/efcreplay` |
 | `tools/carrier_cmp.py` | e-CzasPL carrier against the DCF77 carrier from the `CARRIER` lines |
 | `tools/timing_models.py` | bias-free timing models (18.6 ms e-CzasPL ramp, DCF77 chips) for the fit tools below |
